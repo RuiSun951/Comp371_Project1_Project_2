@@ -25,7 +25,9 @@ A mini solar system simulation featuring:
 - `1`: First-person view (FPP)  
 - `2`: Third-person view (TPP)
 
-### Folder Structure(
+### Folder Structure
+
+```
 Project1/
 ├── README.md
 ├── .gitignore
@@ -40,10 +42,12 @@ Project1/
 ├── models/
 │   └── sphere.obj
 ├── include/
+│   ├── Camera.h
+│   └── SceneObjects.h
 ├── src/
 │   ├── main.cpp
-│   ├── Camera.cpp/h
-│   └── SceneObjects.cpp/h
+│   ├── Camera.cpp
+│   └── SceneObjects.cpp
 ├── stb_image.h
-└── OBJloader.h/.cpp
-)
+└── OBJloader.h/cpp
+```
