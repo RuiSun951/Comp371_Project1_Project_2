@@ -1,37 +1,34 @@
-# Comp371_Project1
-This is project assignment 1 for COMP 371 summer 2025
+# COMP 371 – Project Assignment 1 (Summer 2025)
 
-Group members:
-Rui Sun     40121956
-Yibo Tang   40285121
+**Group Members:**  
+- Rui Sun (40121956)  
+- Yibo Tang (40285121)
 
-Topic:
-Mini Solar System
+## Topic: Mini Solar System
 
-Overview:
+### Overview
+A mini solar system simulation featuring:
+- A central sun
+- Two orbiting planets:
+  - **Planet A**
+  - **Planet B** with a **moon** (2-level hierarchy)
 
-Structure:
-A sun in the middle
-Planet A
-Planet B: with a moon (2 level hierarchy)
+### Features
+- Unique texture for each celestial body
+- Dynamic lighting and shadows
+- Free-flying camera view
 
-Details:
-Each body is mapped with unique texture
-Dynamic lighting & shadow
-Flying camera view
+### Controls
+- `W`, `A`, `S`, `D`: Move the camera  
+- `Shift`: Increase movement speed  
+- Mouse: Control camera rotation  
+- `1`: First-person view (FPP)  
+- `2`: Third-person view (TPP)
 
-Controls:
-WASD: control movement
-Shift: increase speed of movement
-mouse: move flying camera
-"1": FPP
-"2": TPP
-
-
-Folder Structure:
+### Folder Structure(
 Project1/
-├── READ ME.md
-├── gitignore
+├── README.md
+├── .gitignore
 ├── shaders/
 │   ├── vertexShader.glsl
 │   └── fragmentShader.glsl
@@ -49,5 +46,4 @@ Project1/
 │   └── SceneObjects.cpp/h
 ├── stb_image.h
 └── OBJloader.h/.cpp
-
-
+)
