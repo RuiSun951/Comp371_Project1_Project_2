@@ -167,11 +167,6 @@ int main() {
 
     // Set background color
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f); // Dark gray
-
-    // mouse control
-    float deltaTime = 0.0f;
-    float lastFrame = 0.0f;
-
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);    //disable cursor
 
 
@@ -190,7 +185,15 @@ int main() {
         // Clear screen
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // mouse delta
+        // mouse control
+        float deltaTime = 0.0f;
+        float lastFrame = 0.0f;
+        float currentFrame = glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+        if (deltaTime > 0.01f)  // cap movement speed of wasd
+            deltaTime = 0.01f;
+
         camera.update(window, deltaTime);
 
         // camera view: toggle fpp tpp

@@ -40,13 +40,12 @@ Project1/
 │   └── moon.jpg
 ├── models/
 │   └── sphere.obj
-├── include/
-│   ├── Camera.h
-│   └── SceneObjects.h
 ├── src/
 │   ├── main.cpp
-│   ├── Camera.cpp
-│   └── SceneObjects.cpp
+│   ├── camera.h
+│   ├── Vertex.h
+│   └── SceneObjects.h
 ├── stb_image.h
-└── OBJloader.h
+├── OBJloader.h
+└── compiled test program(s)
 ```

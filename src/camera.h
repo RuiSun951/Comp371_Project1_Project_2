@@ -17,7 +17,7 @@ public:
 
     float yaw;
     float pitch;
-    float speed;
+    float speed=1.0f;
     float mouseSensitivity;
     float zoom;
     CameraMode mode;
@@ -91,10 +91,17 @@ public:
     }
 
     void toggleMode() {
-        if (mode == FIRST_PERSON)
+        if (mode == FIRST_PERSON){
+            // Switch to TPP: back up and raise the camera
+            position = position - front * 1.0f + glm::vec3(0.0f, 1.0f, 0.0f);
             mode = THIRD_PERSON;
-        else
+        }
+        else{
+            // Switch to FPP: reset position and orientation
+            position = position + front * 1.0f - glm::vec3(0.0f, 1.0f, 0.0f);
             mode = FIRST_PERSON;
+        }
+
     }
     
     glm::vec3 getPosition() const {
