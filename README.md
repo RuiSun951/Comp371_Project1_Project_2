@@ -49,5 +49,5 @@ Project1/
 │   ├── Camera.cpp
 │   └── SceneObjects.cpp
 ├── stb_image.h
-└── OBJloader.h/cpp
+└── OBJloader.h
 ```
