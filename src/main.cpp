@@ -4,9 +4,70 @@
 #include "Vertex.h" // from src/Vertex.h
 #include <iostream>
 #include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include "camera.h" // from src/camera.h
+#include <fstream>
+#include <sstream>
 
 
+// Load shader source code from a file
+std::string loadShaderSource(const char* filepath) {
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open shader file: " << filepath << std::endl;
+        return "";
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
+GLuint compileShader(GLenum type, const char* source) {
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+    
+    GLint success;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetShaderInfoLog(shader, 512, nullptr, log);
+        std::cerr << "Shader compilation error:\n" << log << std::endl;
+    }
+
+    return shader;
+}
+
+GLuint createShaderProgram(const char* vertPath, const char* fragPath) {
+    std::string vertCode = loadShaderSource(vertPath);
+    std::string fragCode = loadShaderSource(fragPath);
+    
+    GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertCode.c_str());
+    GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragCode.c_str());
+
+    GLuint shaderProgram = glCreateProgram();
+    glAttachShader(shaderProgram, vertexShader);
+    glAttachShader(shaderProgram, fragmentShader);
+    glLinkProgram(shaderProgram);
+
+    // Check for linking errors
+    GLint success;
+    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetProgramInfoLog(shaderProgram, 512, nullptr, log);
+        std::cerr << "Shader program linking error:\n" << log << std::endl;
+    }
+
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+
+    return shaderProgram;
+}
+
+// Vertex structure for the sphere model
 std::vector<Vertex> sphereVertices;
 std::vector<unsigned int> sphereIndices;
 GLuint sphereVAO, sphereVBO, sphereEBO;
@@ -53,27 +114,9 @@ bool loadSphereModel(const char *path) {
 }
 
 //set up camera
-Camera camera(glm::vec3(0.0f, 1.0f, 5.0f), glm::vec3(0, 1, 0), -90.0f, 0.0f);
 bool tabPressedLastFrame = false;
-
-float lastX = 400, lastY = 300;
-bool firstMouse = true;
-
-void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
-    if (firstMouse) {
-        lastX = xpos;
-        lastY = ypos;
-        firstMouse = false;
-    }
-
-    float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos; // reversed
-
-    lastX = xpos;
-    lastY = ypos;
-
-    camera.processMouseMovement(xoffset, yoffset);
-}
+const float cameraSpeed = 2.5f;
+const float cameraFastSpeed = 6.0f;
 
 
 int main() {
@@ -102,10 +145,20 @@ int main() {
     // Enable back face culling
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
-    glFrontFace(GL_CCW); // Counter-clockwise is default winding (most OBJ files use this)
+    glFrontFace(GL_CCW); // Counter-clockwise is default winding
 
     // Enable depth testing
     glEnable(GL_DEPTH_TEST);
+
+    // Create shader program
+    GLuint shaderProgram = createShaderProgram("shaders/vertexShader.glsl", "shaders/fragmentShader.glsl");
+    glUseProgram(shaderProgram);
+
+    glUniform3f(glGetUniformLocation(shaderProgram, "lightPos"), 5.0f, 5.0f, 5.0f);
+    glUniform3f(glGetUniformLocation(shaderProgram, "lightColor"), 1.0f, 1.0f, 1.0f);
+    glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.4f, 0.6f, 1.0f);
+
+
 
     // Load the sphere model from OBJ file
     if (!loadSphereModel("models/sphere.obj")) {
@@ -118,33 +171,59 @@ int main() {
     // mouse control
     float deltaTime = 0.0f;
     float lastFrame = 0.0f;
-    glfwSetCursorPosCallback(window, mouse_callback);
+
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);    //disable cursor
 
 
+    // camera setup
+    Camera camera(
+        glm::vec3(0.0f, 1.0f, 5.0f),  // camera position
+        glm::vec3(0.0f, 1.0f, 0.0f),  // camera up
+        -90.0f,                       // yaw
+        0.0f                          // pitch
+    );
 
-    // main render loop...
+
+    // main render loop
     while (!glfwWindowShouldClose(window)) {
-        // Calculate delta time
-        float currentFrame = glfwGetTime();
-        deltaTime = currentFrame - lastFrame;
-        lastFrame = currentFrame;
 
         // Clear screen
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // camera view control
-        bool tabPressedNow = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
+        // mouse delta
+        camera.update(window, deltaTime);
 
+        // camera view: toggle fpp tpp
+        bool tabPressedNow = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
         if (tabPressedNow && !tabPressedLastFrame) {
             camera.toggleMode();
         }
         tabPressedLastFrame = tabPressedNow;
 
-        camera.processKeyboard(window, deltaTime);
 
+        // Create transformation matrices
+        glm::mat4 model = glm::mat4(1.0f); // identity
+        glm::mat4 view = camera.getViewMatrix();  // use your camera's method
+        glm::mat4 projection = glm::perspective(
+            glm::radians(45.0f),
+            800.0f / 600.0f,   // aspect ratio
+            0.1f,
+            100.0f
+        );
 
+        // Send to shader
+        GLuint modelLoc = glGetUniformLocation(shaderProgram, "model");
+        GLuint viewLoc = glGetUniformLocation(shaderProgram, "view");
+        GLuint projLoc = glGetUniformLocation(shaderProgram, "projection");
 
+        // Update camera/view uniforms
+        glm::vec3 camPos = camera.getPosition();
+        glUniform3f(glGetUniformLocation(shaderProgram, "viewPos"), camPos.x, camPos.y, camPos.z);
+
+        // Update transformation matrices
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+        glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
 
         // Draw the sphere
         glBindVertexArray(sphereVAO);

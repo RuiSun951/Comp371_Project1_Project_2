@@ -38,6 +38,27 @@ public:
             return glm::lookAt(position - front * 5.0f + glm::vec3(0.0f, 2.0f, 0.0f), position, up);
     }
 
+    void update(GLFWwindow* window, float deltaTime) {
+        processKeyboard(window, deltaTime);
+
+        double xpos, ypos;
+        glfwGetCursorPos(window, &xpos, &ypos);
+
+        if (firstMouse) {
+            lastMouseX = xpos;
+            lastMouseY = ypos;
+            firstMouse = false;
+        }
+
+        double xoffset = xpos - lastMouseX;
+        double yoffset = lastMouseY - ypos; // reversed
+
+        lastMouseX = xpos;
+        lastMouseY = ypos;
+
+        processMouseMovement((float)xoffset, (float)yoffset);
+    }
+
     void processKeyboard(GLFWwindow* window, float deltaTime) {
         float velocity = speed * deltaTime;
         if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
@@ -54,10 +75,11 @@ public:
     }
 
     void processMouseMovement(float xoffset, float yoffset) {
+        float mouseSensitivity = 0.003f;
         xoffset *= mouseSensitivity;
         yoffset *= mouseSensitivity;
 
-        yaw += xoffset;
+        yaw -= xoffset;
         pitch += yoffset;
 
         if (pitch > 89.0f)
@@ -74,8 +96,16 @@ public:
         else
             mode = FIRST_PERSON;
     }
+    
+    glm::vec3 getPosition() const {
+        return position;
+    }
+
 
 private:
+    double lastMouseX = 400.0, lastMouseY = 300.0;
+    bool firstMouse = true;
+
     void updateCameraVectors() {
         glm::vec3 f;
         f.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
