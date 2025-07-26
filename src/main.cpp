@@ -4,13 +4,14 @@
 #include "Vertex.h" // from src/Vertex.h
 #include <iostream>
 #include <GLFW/glfw3.h>
+#include "camera.h" // from src/camera.h
 
 
 std::vector<Vertex> sphereVertices;
 std::vector<unsigned int> sphereIndices;
-
 GLuint sphereVAO, sphereVBO, sphereEBO;
 
+// Load the sphere model from an OBJ file
 bool loadSphereModel(const char *path) {
     std::vector <glm::vec3> positions;
     std::vector <glm::vec3> normals;
@@ -28,7 +29,7 @@ bool loadSphereModel(const char *path) {
         v.normal = (i < normals.size()) ? normals[i] : glm::vec3(0.0f);
         v.texCoord = (i < uvs.size()) ? uvs[i] : glm::vec2(0.0f);
         sphereVertices.push_back(v);
-        sphereIndices.push_back(i); // 0,1,2,3...
+        sphereIndices.push_back(i); 
     }
 
     // Upload to GPU
@@ -50,6 +51,30 @@ bool loadSphereModel(const char *path) {
     glBindVertexArray(0);
     return true;
 }
+
+//set up camera
+Camera camera(glm::vec3(0.0f, 1.0f, 5.0f), glm::vec3(0, 1, 0), -90.0f, 0.0f);
+bool tabPressedLastFrame = false;
+
+float lastX = 400, lastY = 300;
+bool firstMouse = true;
+
+void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (firstMouse) {
+        lastX = xpos;
+        lastY = ypos;
+        firstMouse = false;
+    }
+
+    float xoffset = xpos - lastX;
+    float yoffset = lastY - ypos; // reversed
+
+    lastX = xpos;
+    lastY = ypos;
+
+    camera.processMouseMovement(xoffset, yoffset);
+}
+
 
 int main() {
     // Initialize OpenGL context, GLEW, etc. here...
@@ -74,6 +99,11 @@ int main() {
         return -1;
     }
 
+    // Enable back face culling
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW); // Counter-clockwise is default winding (most OBJ files use this)
+
     // Enable depth testing
     glEnable(GL_DEPTH_TEST);
 
@@ -85,12 +115,34 @@ int main() {
     // Set background color
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f); // Dark gray
 
+    // mouse control
+    float deltaTime = 0.0f;
+    float lastFrame = 0.0f;
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);    //disable cursor
+
+
+
     // main render loop...
     while (!glfwWindowShouldClose(window)) {
+        // Calculate delta time
+        float currentFrame = glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
         // Clear screen
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        //set up camera
+        // camera view control
+        bool tabPressedNow = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
+
+        if (tabPressedNow && !tabPressedLastFrame) {
+            camera.toggleMode();
+        }
+        tabPressedLastFrame = tabPressedNow;
+
+        camera.processKeyboard(window, deltaTime);
+
 
 
 
@@ -99,7 +151,12 @@ int main() {
         glDrawArrays(GL_TRIANGLES, 0, sphereVertices.size());
         glBindVertexArray(0);
 
-         // Swap buffers and poll events
+        // esc to exit the program
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS){
+            glfwSetWindowShouldClose(window, true);
+        }
+
+        // Swap buffers and poll events
         glfwSwapBuffers(window);
         glfwPollEvents();
     }

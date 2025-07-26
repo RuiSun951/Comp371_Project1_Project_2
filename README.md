@@ -22,8 +22,7 @@ A mini solar system simulation featuring:
 - `W`, `A`, `S`, `D`: Move the camera  
 - `Shift`: Increase movement speed  
 - Mouse: Control camera rotation  
-- `1`: First-person view (FPP)  
-- `2`: Third-person view (TPP)
+- Press `Tab` to toggle between First-person view (FPP) and Third-person view (TPP)
 
 ### Folder Structure
 
