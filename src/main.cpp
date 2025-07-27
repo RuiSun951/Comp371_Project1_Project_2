@@ -10,6 +10,8 @@
 #include "camera.h" // from src/camera.h
 #include <fstream>
 #include <sstream>
+#include <unordered_map>
+
 
 
 // Load shader source code from a file
@@ -74,34 +76,69 @@ GLuint sphereVAO, sphereVBO, sphereEBO;
 
 // Load the sphere model from an OBJ file
 bool loadSphereModel(const char *path) {
-    std::vector <glm::vec3> positions;
-    std::vector <glm::vec3> normals;
-    std::vector <glm::vec2> uvs;
+    std::vector<glm::vec3> positions, normals;
+    std::vector<glm::vec2> uvs;
+    std::vector<unsigned int> indices;
 
-    if (!loadOBJ(path, positions, normals, uvs)) {
+    if (!loadOBJ(path, positions, normals, uvs, indices)) {
         std::cerr << "Failed to load " << path << std::endl;
         return false;
     }
 
-    // Convert to Vertex struct
+    struct PackedVertex {
+        glm::vec3 position;
+        glm::vec3 normal;
+        glm::vec2 texCoord;
+
+        bool operator==(const PackedVertex& other) const {
+            return position == other.position && normal == other.normal && texCoord == other.texCoord;
+        }
+    };
+
+    struct Hasher {
+        size_t operator()(const PackedVertex& v) const {
+            size_t h1 = std::hash<float>()(v.position.x) ^ std::hash<float>()(v.position.y) ^ std::hash<float>()(v.position.z);
+            size_t h2 = std::hash<float>()(v.normal.x) ^ std::hash<float>()(v.normal.y) ^ std::hash<float>()(v.normal.z);
+            size_t h3 = std::hash<float>()(v.texCoord.x) ^ std::hash<float>()(v.texCoord.y);
+            return h1 ^ h2 ^ h3;
+        }
+    };
+
+    std::unordered_map<PackedVertex, unsigned int, Hasher> vertexToIndex;
+    sphereVertices.clear();
+    sphereIndices.clear();
+
     for (size_t i = 0; i < positions.size(); ++i) {
-        Vertex v;
-        v.position = positions[i];
-        v.normal = (i < normals.size()) ? normals[i] : glm::vec3(0.0f);
-        v.texCoord = (i < uvs.size()) ? uvs[i] : glm::vec2(0.0f);
-        sphereVertices.push_back(v);
-        sphereIndices.push_back(i); 
+        PackedVertex packed = {
+            positions[i],
+            (i < normals.size()) ? normals[i] : glm::vec3(0.0f),
+            (i < uvs.size()) ? uvs[i] : glm::vec2(0.0f)
+        };
+
+        auto it = vertexToIndex.find(packed);
+        if (it != vertexToIndex.end()) {
+            sphereIndices.push_back(it->second);
+        } else {
+            sphereVertices.push_back({ packed.position, packed.texCoord, packed.normal });
+            unsigned int newIndex = static_cast<unsigned int>(sphereVertices.size() - 1);
+            vertexToIndex[packed] = newIndex;
+            sphereIndices.push_back(newIndex);
+        }
     }
 
     // Upload to GPU
     glGenVertexArrays(1, &sphereVAO);
     glGenBuffers(1, &sphereVBO);
+    glGenBuffers(1, &sphereEBO);
 
     glBindVertexArray(sphereVAO);
+
     glBindBuffer(GL_ARRAY_BUFFER, sphereVBO);
     glBufferData(GL_ARRAY_BUFFER, sphereVertices.size() * sizeof(Vertex), sphereVertices.data(), GL_STATIC_DRAW);
 
-    // Layout
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sphereEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sphereIndices.size() * sizeof(unsigned int), sphereIndices.data(), GL_STATIC_DRAW);
+
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, texCoord));
@@ -111,6 +148,7 @@ bool loadSphereModel(const char *path) {
 
     glBindVertexArray(0);
     return true;
+
 }
 
 //set up camera
@@ -177,6 +215,7 @@ int main() {
         -90.0f,                       // yaw
         0.0f                          // pitch
     );
+    static float lastFrame = 0.0f;
 
 
     // main render loop
@@ -187,7 +226,6 @@ int main() {
 
         // mouse control
         float deltaTime = 0.0f;
-        float lastFrame = 0.0f;
         float currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
@@ -230,7 +268,7 @@ int main() {
 
         // Draw the sphere
         glBindVertexArray(sphereVAO);
-        glDrawArrays(GL_TRIANGLES, 0, sphereVertices.size());
+        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
 
         // esc to exit the program
