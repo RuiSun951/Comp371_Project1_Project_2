@@ -11,8 +11,9 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include "SceneNode.h" // from src/SceneNode.h
 
-//////////
+
 
 // Load shader source code from a file
 std::string loadShaderSource(const char* filepath) {
@@ -156,6 +157,12 @@ bool tabPressedLastFrame = false;
 const float cameraSpeed = 2.5f;
 const float cameraFastSpeed = 6.0f;
 
+//Yibo Tang
+void drawSphere() {
+    glBindVertexArray(sphereVAO);
+    glDrawArrays(GL_TRIANGLES, 0, sphereVertices.size());
+    glBindVertexArray(0);
+}
 
 int main() {
     // Initialize OpenGL context, GLEW, etc. here...
@@ -217,6 +224,28 @@ int main() {
     );
     static float lastFrame = 0.0f;
 
+    GLuint modelLoc = glGetUniformLocation(shaderProgram, "model");
+
+  SceneNode* root = new SceneNode();
+  SceneNode* planet = new SceneNode();
+  SceneNode* moon = new SceneNode();
+
+  root->addChild(planet);
+  planet->addChild(moon);
+
+  // Now modelLoc is valid here:
+  root->drawFunc = [&](const glm::mat4& model) {
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+    drawSphere();
+};
+  planet->drawFunc = root->drawFunc;
+  moon->drawFunc = root->drawFunc;
+
+  // Time control factor
+  float timeScale = 0.2f;
+
+  float deltaTime = 0.0f;
+  //float lastFrame = 0.0f;
 
     // main render loop
     while (!glfwWindowShouldClose(window)) {
@@ -229,6 +258,9 @@ int main() {
         float currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
+        // Yibo Tang
+        float scaledTime = currentFrame * timeScale;
+
         if (deltaTime > 0.01f)  // cap movement speed of wasd
             deltaTime = 0.01f;
 
@@ -257,6 +289,10 @@ int main() {
         GLuint viewLoc = glGetUniformLocation(shaderProgram, "view");
         GLuint projLoc = glGetUniformLocation(shaderProgram, "projection");
 
+        //Yibo Tang
+       // glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
+        //glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
+
         // Update camera/view uniforms
         glm::vec3 camPos = camera.getPosition();
         glUniform3f(glGetUniformLocation(shaderProgram, "viewPos"), camPos.x, camPos.y, camPos.z);
@@ -270,6 +306,24 @@ int main() {
         glBindVertexArray(sphereVAO);
         glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
+
+        // Yibo Tang: Update transforms (hierarchical scene graph)
+        // Sun self-rotation
+        root->localTransform = glm::rotate(glm::mat4(1.0f), scaledTime, glm::vec3(0, 1, 0));
+
+        // planet orbiting the sun + self-rotation
+        glm::mat4 planetOrbit = glm::rotate(glm::mat4(1.0f), scaledTime *0.1f, glm::vec3(0, 1, 0));
+        planetOrbit = glm::translate(planetOrbit, glm::vec3(5.0f, 0.0f, 0.0f));
+        planet->localTransform = glm::rotate(planetOrbit, scaledTime * 0.8f, glm::vec3(0, 1, 0));
+
+        //Moon orbiting the planet
+        glm::mat4 moonOrbit = glm::rotate(glm::mat4(1.0f), scaledTime * 0.4f, glm::vec3(0, 1, 0));
+        moonOrbit = glm::translate(moonOrbit, glm::vec3(2.0f, 0.0f, 0.0f));
+        moon->localTransform = glm::scale(moonOrbit, glm::vec3(0.5f));
+
+        // Draw the whole scene recursively
+        root->draw(glm::mat4(1.0f)); // Identity matrix as root
+
 
         // esc to exit the program
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS){
