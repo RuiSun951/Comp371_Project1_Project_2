@@ -70,6 +70,13 @@ GLuint createShaderProgram(const char* vertPath, const char* fragPath) {
     return shaderProgram;
 }
 
+// time control toggle
+bool capsPressedLastFrame = false;
+bool timeControlOn       = false;
+float timeSpeed          = 1.0f;
+const float normalSpeed  = 1.0f;
+const float fastSpeed    = 3.0f;
+
 // Vertex structure for the sphere model
 std::vector<Vertex> sphereVertices;
 std::vector<unsigned int> sphereIndices;
@@ -333,7 +340,7 @@ int main() {
     float timeScale = 0.2f;
 
     float deltaTime = 0.0f;
-    //float lastFrame = 0.0f;
+    float simTime = 0.0f;
 
     // main render loop
     while (!glfwWindowShouldClose(window)) {
@@ -347,8 +354,15 @@ int main() {
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        // Yibo Tang
-        float scaledTime = glfwGetTime() * timeScale;
+        // check time speed toggle by CAPS
+        bool capsPressedNow = glfwGetKey(window, GLFW_KEY_CAPS_LOCK) == GLFW_PRESS;
+        if (capsPressedNow && !capsPressedLastFrame) {
+            timeControlOn = !timeControlOn;
+            timeSpeed     = timeControlOn ? fastSpeed : normalSpeed;
+        }
+        capsPressedLastFrame = capsPressedNow;
+        simTime += deltaTime *timeSpeed;
+        float scaledTime = simTime * timeScale;
 
         if (deltaTime > 0.01f)  // cap movement speed of wasd
             deltaTime = 0.01f;
@@ -387,7 +401,7 @@ int main() {
         glm::vec3 lightColor1 = glm::vec3(1.0f);
 
         // Light 2: dynamic shooting star across the sky, single direction shooting, loop periodically
-        float angle = currentFrame * 0.5f; 
+        float angle = simTime * 0.5f;
         glm::vec3 lightPos2 = glm::vec3(0.0f , 8.0f * cos(angle), 8.0f * sin(angle));
         glm::vec3 lightColor2 = glm::vec3(1.0f, 1.0f, 1.0f);  // shooting star bright full white for better seeing in testing
 

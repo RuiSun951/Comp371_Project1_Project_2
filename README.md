@@ -23,6 +23,7 @@ A mini solar system simulation featuring:
 - `Shift`: Increase movement speed  
 - Mouse: Control camera rotation  
 - Press `Tab` to toggle between First-person view (FPP) and Third-person view (TPP)
+- Press `Caps` to toggle between standard time lapse and 3x time lapse
 
 ### Folder Structure
 
