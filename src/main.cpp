@@ -376,7 +376,13 @@ int main() {
     //glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
    // drawSphere();
 
- root->drawFunc = [&](const glm::mat4& model) {
+   // Galaxy follows camera and is very large
+   glm::mat4 galaxyTransform = glm::translate(glm::mat4(1.0f), camera.getPosition());
+   galaxyTransform = glm::scale(galaxyTransform, glm::vec3(50.0f)); // or 100.0f
+   galaxy->localTransform = galaxyTransform;
+
+
+    root->drawFunc = [&](const glm::mat4& model) {
     glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
     
     glActiveTexture(GL_TEXTURE0);
