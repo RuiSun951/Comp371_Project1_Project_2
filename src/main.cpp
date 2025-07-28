@@ -193,7 +193,7 @@ void drawSphere() {
     //glBindVertexArray(sphereVAO);
     //glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
     //glDrawArrays(GL_TRIANGLES, 0, sphereVertices.size());
-    //glBindVertexArray(0);
+    //glBindVertexArray(0);/
 }
 
 // Yibo Tang: Insert the texture
