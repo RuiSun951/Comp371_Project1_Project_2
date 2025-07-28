@@ -29,4 +29,9 @@ public:
             child->draw(globalTransform);
         }
     }
+
+    glm::mat4 getGlobalTransform(const glm::mat4& parentTransform = glm::mat4(1.0f)) const {
+        return parentTransform * localTransform;
+    }
+
 };

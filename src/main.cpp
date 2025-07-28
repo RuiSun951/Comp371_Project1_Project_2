@@ -75,6 +75,22 @@ std::vector<Vertex> sphereVertices;
 std::vector<unsigned int> sphereIndices;
 GLuint sphereVAO, sphereVBO, sphereEBO;
 
+// Orbit line variables declare
+// this is generating orbit traces for ez observation in testing
+GLuint planetOrbitVAO, planetOrbitVBO;
+const int ORBIT_SEGMENTS = 100;
+std::vector<glm::vec3> planetOrbitVertices;
+
+GLuint moonOrbitVAO, moonOrbitVBO;
+std::vector<glm::vec3> moonOrbitVertices;
+
+//shooting star as a dynamic lighting source
+// for shooting star trail
+std::vector<glm::vec3> trailPositions;
+const int TRAIL_LENGTH=50;
+GLuint trailVAO, trailVBO;
+
+
 // Load the sphere model from an OBJ file
 bool loadSphereModel(const char *path) {
     std::vector<glm::vec3> positions, normals;
@@ -210,6 +226,44 @@ int main() {
         return -1; 
     }
 
+    //set up orbit traces ellipses? circles
+    for (int i = 0; i <= ORBIT_SEGMENTS; ++i) {
+        float angle = 2.0f * glm::pi<float>() * i / ORBIT_SEGMENTS;
+        planetOrbitVertices.push_back(glm::vec3(5.0f * cos(angle), 0.0f, 5.0f * sin(angle))); // planet orbit
+        moonOrbitVertices.push_back(glm::vec3(2.0f * cos(angle), 0.0f, 2.0f * sin(angle)));     // moon orbit
+    }
+
+    // Upload to GPU
+    // planet orbit
+    glGenVertexArrays(1, &planetOrbitVAO);
+    glGenBuffers(1, &planetOrbitVBO);
+    glBindVertexArray(planetOrbitVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, planetOrbitVBO);
+    glBufferData(GL_ARRAY_BUFFER, planetOrbitVertices.size() * sizeof(glm::vec3), planetOrbitVertices.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
+    // moon orbit
+    glGenVertexArrays(1, &moonOrbitVAO);
+    glGenBuffers(1, &moonOrbitVBO);
+    glBindVertexArray(moonOrbitVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, moonOrbitVBO);
+    glBufferData(GL_ARRAY_BUFFER, moonOrbitVertices.size() * sizeof(glm::vec3), moonOrbitVertices.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
+    // shooting star trail
+    glGenVertexArrays(1, &trailVAO);
+    glGenBuffers(1, &trailVBO);
+    glBindVertexArray(trailVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, trailVBO);
+    glBufferData(GL_ARRAY_BUFFER, TRAIL_LENGTH * sizeof(glm::vec3), nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
     // Set background color
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f); // Dark gray
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);    //disable cursor
@@ -226,26 +280,35 @@ int main() {
 
     GLuint modelLoc = glGetUniformLocation(shaderProgram, "model");
 
-  SceneNode* root = new SceneNode();
-  SceneNode* planet = new SceneNode();
-  SceneNode* moon = new SceneNode();
+    SceneNode* root = new SceneNode();
+    SceneNode* planet = new SceneNode();
+    SceneNode* moon = new SceneNode();
+    SceneNode* shootingStar = new SceneNode();
 
-  root->addChild(planet);
-  planet->addChild(moon);
+    root->addChild(planet);
+    planet->addChild(moon);
+    root->addChild(shootingStar);
 
-  // Now modelLoc is valid here:
-  root->drawFunc = [&](const glm::mat4& model) {
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-    drawSphere();
-};
-  planet->drawFunc = root->drawFunc;
-  moon->drawFunc = root->drawFunc;
 
-  // Time control factor
-  float timeScale = 0.2f;
+    // Now modelLoc is valid here:
+    auto drawFunc = [&](const glm::mat4& model) {
+        glUseProgram(shaderProgram);    // optional, but ensure shader is active
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+        glBindVertexArray(sphereVAO);
+        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+    };
 
-  float deltaTime = 0.0f;
-  //float lastFrame = 0.0f;
+    root->drawFunc = drawFunc;
+    planet->drawFunc = drawFunc;
+    moon->drawFunc = drawFunc;
+    shootingStar->drawFunc = drawFunc;
+
+    // Time control factor
+    float timeScale = 0.2f;
+
+    float deltaTime = 0.0f;
+    //float lastFrame = 0.0f;
 
     // main render loop
     while (!glfwWindowShouldClose(window)) {
@@ -258,6 +321,7 @@ int main() {
         float currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
+
         // Yibo Tang
         float scaledTime = currentFrame * timeScale;
 
@@ -289,23 +353,40 @@ int main() {
         GLuint viewLoc = glGetUniformLocation(shaderProgram, "view");
         GLuint projLoc = glGetUniformLocation(shaderProgram, "projection");
 
-        //Yibo Tang
-       // glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
-        //glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
-
         // Update camera/view uniforms
         glm::vec3 camPos = camera.getPosition();
         glUniform3f(glGetUniformLocation(shaderProgram, "viewPos"), camPos.x, camPos.y, camPos.z);
 
+        // Light 1: static top-right
+        glm::vec3 lightPos1 = glm::vec3(10.0f, 10.0f, 10.0f);
+        glm::vec3 lightColor1 = glm::vec3(1.0f);
+
+        // Light 2: dynamic shooting star across the sky
+        glm::vec3 lightPos2 = glm::vec3(5.0f * sin(currentFrame * 0.8f), 4.0f, 5.0f * cos(currentFrame * 0.8f));
+        glm::vec3 lightColor2 = glm::vec3(1.0f, 1.0f, 1.0f);  // shooting star bright full white for better seeing in testing
+        // Update shooting star's transform
+        glm::mat4 starTransform = glm::translate(glm::mat4(1.0f), lightPos2);
+        starTransform = glm::scale(starTransform, glm::vec3(0.2f));
+        shootingStar->localTransform = starTransform;
+        
+        // Update trail positions
+        trailPositions.push_back(lightPos2);
+        if (trailPositions.size() > TRAIL_LENGTH)
+            trailPositions.erase(trailPositions.begin());
+
+        glBindBuffer(GL_ARRAY_BUFFER, trailVBO);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, trailPositions.size() * sizeof(glm::vec3), trailPositions.data());
+
+
+        // upload 2 lights to shader
+        glUniform3fv(glGetUniformLocation(shaderProgram, "lightPos1"), 1, glm::value_ptr(lightPos1));
+        glUniform3fv(glGetUniformLocation(shaderProgram, "lightColor1"), 1, glm::value_ptr(lightColor1));
+        glUniform3fv(glGetUniformLocation(shaderProgram, "lightPos2"), 1, glm::value_ptr(lightPos2));
+        glUniform3fv(glGetUniformLocation(shaderProgram, "lightColor2"), 1, glm::value_ptr(lightColor2));
+
         // Update transformation matrices
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
         glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
-
-        // Draw the sphere
-        glBindVertexArray(sphereVAO);
-        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
-        glBindVertexArray(0);
 
         // Yibo Tang: Update transforms (hierarchical scene graph)
         // Sun self-rotation
@@ -321,9 +402,30 @@ int main() {
         moonOrbit = glm::translate(moonOrbit, glm::vec3(2.0f, 0.0f, 0.0f));
         moon->localTransform = glm::scale(moonOrbit, glm::vec3(0.5f));
 
-        // Draw the whole scene recursively
-        root->draw(glm::mat4(1.0f)); // Identity matrix as root
+        // Draw planet orbit (around origin)
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.5f, 0.5f, 0.5f);
+        glBindVertexArray(planetOrbitVAO);
+        glDrawArrays(GL_LINE_LOOP, 0, ORBIT_SEGMENTS + 1);
 
+        // compute planet global transformation
+        glm::mat4 planetGlobal = planet->getGlobalTransform(root->localTransform);
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(planetGlobal));    
+
+
+        // Draw moon orbit (cnetered around planet, and this is not static)
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.5f, 0.3f, 0.5f);
+        glBindVertexArray(moonOrbitVAO);
+        glDrawArrays(GL_LINE_LOOP, 0, ORBIT_SEGMENTS + 1);
+
+        // Draw the trail of the shooting star
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.3f, 0.6f, 1.0f); // bluish trail
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
+        glBindVertexArray(trailVAO);
+        glDrawArrays(GL_LINE_STRIP, 0, trailPositions.size());
+
+        // Draw the scene recursively, instead of draw sphere one by one, use root
+        root->draw(glm::mat4(1.0f));
 
         // esc to exit the program
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS){
