@@ -99,7 +99,7 @@ std::vector<glm::vec3> planetBOrbitVertices;
 GLuint moonOrbitVAO, moonOrbitVBO;
 std::vector<glm::vec3> moonOrbitVertices;
 
-//shooting star as a dynamic lighting source
+// shooting star as a dynamic lighting source
 // for shooting star trail
 std::vector<glm::vec3> trailPositions;
 const int TRAIL_LENGTH=300;
@@ -344,8 +344,8 @@ int main() {
 
    GLuint modelLoc = glGetUniformLocation(shaderProgram, "model");
 
-<<<<<<< HEAD
     SceneNode* root = new SceneNode();  //identity node
+    SceneNode* galaxy = new SceneNode();
     SceneNode* sun = new SceneNode();   //separate sun from identity
     SceneNode* planetB = new SceneNode();
     SceneNode* shootingStar = new SceneNode();
@@ -354,22 +354,13 @@ int main() {
     SceneNode* moon = new SceneNode();
 
     root->addChild(sun);
+    root->addChild(galaxy);
     root->addChild(planetA_orbit);
     planetA_orbit ->addChild(planetA_body);
     planetA_orbit ->addChild(moon);
     root->addChild(planetB);
     root->addChild(shootingStar);
 
-=======
-  SceneNode* root = new SceneNode();
-  SceneNode* planet = new SceneNode();
-  SceneNode* moon = new SceneNode();
-  SceneNode* galaxy = new SceneNode();
-  
-  root->addChild(planet);
-  planet->addChild(moon);
-  root->addChild(galaxy); // Galaxy is a background, so attach to root
->>>>>>> 5d214c7 (texture for sphere)
 
   // Now modelLoc is valid here:
   //root->drawFunc = [&](const glm::mat4& model) {
@@ -393,7 +384,7 @@ int main() {
     glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 };
- planet->drawFunc = [&](const glm::mat4& model) {
+    planetA_body->drawFunc = [&](const glm::mat4& model) {
     glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
     
     glActiveTexture(GL_TEXTURE0);
@@ -432,9 +423,9 @@ int main() {
 
     // Time control factor
     float timeScale = 0.2f;
-
-  float deltaTime = 0.0f;
-  float lastFrame = 0.0f;
+    float deltaTime = 0.0f;
+    float lastFrame = 0.0f;
+    float simTime =0.0f;
 
     // main render loop
     while (!glfwWindowShouldClose(window)) {
