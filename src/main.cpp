@@ -193,7 +193,7 @@ void drawSphere() {
     //glBindVertexArray(sphereVAO);
     //glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
     //glDrawArrays(GL_TRIANGLES, 0, sphereVertices.size());
-    //glBindVertexArray(0);/
+    //glBindVertexArray(0);//
 }
 
 // Yibo Tang: Insert the texture
@@ -266,7 +266,10 @@ int main() {
     glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.4f, 0.6f, 1.0f);
 
     // Load the Sun texture
-    GLuint sunTexture = loadTexture("textures/sun.jpg");
+    GLuint sunTexture = loadTexture("texture/sun.jpg");
+    GLuint earthTextture = loadTexture("texture/earth.jpg");
+    GLuint moonTexture = loadTexture("texture/moon.jpg");
+    GLuint galaxyTexture = loadTexture("texture/galaxy.jpg");
 
 
     // Load the sphere model from OBJ file
@@ -332,7 +335,7 @@ int main() {
 
     // camera setup
     Camera camera(
-        glm::vec3(0.0f, 1.0f, 15.0f),  // camera position
+        glm::vec3(0.0f, 1.0f, 10.0f),  // camera position
         glm::vec3(0.0f, 1.0f, 0.0f),  // camera up
         -90.0f,                       // yaw
         0.0f                          // pitch
@@ -341,6 +344,7 @@ int main() {
 
    GLuint modelLoc = glGetUniformLocation(shaderProgram, "model");
 
+<<<<<<< HEAD
     SceneNode* root = new SceneNode();  //identity node
     SceneNode* sun = new SceneNode();   //separate sun from identity
     SceneNode* planetB = new SceneNode();
@@ -356,13 +360,23 @@ int main() {
     root->addChild(planetB);
     root->addChild(shootingStar);
 
+=======
+  SceneNode* root = new SceneNode();
+  SceneNode* planet = new SceneNode();
+  SceneNode* moon = new SceneNode();
+  SceneNode* galaxy = new SceneNode();
+  
+  root->addChild(planet);
+  planet->addChild(moon);
+  root->addChild(galaxy); // Galaxy is a background, so attach to root
+>>>>>>> 5d214c7 (texture for sphere)
 
   // Now modelLoc is valid here:
   //root->drawFunc = [&](const glm::mat4& model) {
     //glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
    // drawSphere();
 
-root->drawFunc = [&](const glm::mat4& model) {
+ root->drawFunc = [&](const glm::mat4& model) {
     glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
     
     glActiveTexture(GL_TEXTURE0);
@@ -373,9 +387,42 @@ root->drawFunc = [&](const glm::mat4& model) {
     glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 };
+ planet->drawFunc = [&](const glm::mat4& model) {
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, earthTextture); // Earth texture here
 
-  planet->drawFunc = root->drawFunc;
-  moon->drawFunc = root->drawFunc;
+    glBindVertexArray(sphereVAO);
+    glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+};
+
+ moon->drawFunc = [&](const glm::mat4& model) {
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, moonTexture); // Moon texture here
+
+    glBindVertexArray(sphereVAO);
+    glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+};
+ galaxy->drawFunc = [&](const glm::mat4& model) {
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, galaxyTexture); // Use the galaxy texture
+
+    glBindVertexArray(sphereVAO);
+    glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+};
+
+
+
+  //planet->drawFunc = root->drawFunc;
+  //moon->drawFunc = root->drawFunc;
 
     // Time control factor
     float timeScale = 0.2f;
