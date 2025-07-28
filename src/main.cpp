@@ -12,6 +12,8 @@
 #include <sstream>
 #include <unordered_map>
 #include "SceneNode.h" // from src/SceneNode.h
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb/stb_image.h>
 
 
 
@@ -188,9 +190,36 @@ const float cameraFastSpeed = 6.0f;
 
 //Yibo Tang
 void drawSphere() {
-    glBindVertexArray(sphereVAO);
-    glDrawArrays(GL_TRIANGLES, 0, sphereVertices.size());
-    glBindVertexArray(0);
+    //glBindVertexArray(sphereVAO);
+    //glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+    //glDrawArrays(GL_TRIANGLES, 0, sphereVertices.size());
+    //glBindVertexArray(0);
+}
+
+// Yibo Tang: Insert the texture
+    GLuint loadTexture(const char* filename) {
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+
+    // Texture parameters
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    //Load image using stb_image
+    int width, height, nrChannels;
+    unsigned char *data = stbi_load(filename, &width, &height, &nrChannels, 0);
+    if (data) {
+        GLenum format = (nrChannels == 3) ? GL_RGB : GL_RGBA;
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+    } else {
+        std::cerr << "Failed to load texture: " << filename << std::endl;
+    }
+    stbi_image_free(data);
+    return textureID;
 }
 
 int main() {
@@ -227,11 +256,17 @@ int main() {
     // Create shader program
     GLuint shaderProgram = createShaderProgram("shaders/vertexShader.glsl", "shaders/fragmentShader.glsl");
     glUseProgram(shaderProgram);
+    
+    //Yibo Tang Set texture sampler uniform to texture unit 0
+    glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+
 
     glUniform3f(glGetUniformLocation(shaderProgram, "lightPos"), 5.0f, 5.0f, 5.0f);
     glUniform3f(glGetUniformLocation(shaderProgram, "lightColor"), 1.0f, 1.0f, 1.0f);
     glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.4f, 0.6f, 1.0f);
 
+    // Load the Sun texture
+    GLuint sunTexture = loadTexture("textures/sun.jpg");
 
 
     // Load the sphere model from OBJ file
@@ -297,14 +332,14 @@ int main() {
 
     // camera setup
     Camera camera(
-        glm::vec3(0.0f, 1.0f, 5.0f),  // camera position
+        glm::vec3(0.0f, 1.0f, 15.0f),  // camera position
         glm::vec3(0.0f, 1.0f, 0.0f),  // camera up
         -90.0f,                       // yaw
         0.0f                          // pitch
     );
-    static float lastFrame = 0.0f;
+   // static float lastFrame = 0.0f;
 
-    GLuint modelLoc = glGetUniformLocation(shaderProgram, "model");
+   GLuint modelLoc = glGetUniformLocation(shaderProgram, "model");
 
     SceneNode* root = new SceneNode();  //identity node
     SceneNode* sun = new SceneNode();   //separate sun from identity
@@ -322,25 +357,31 @@ int main() {
     root->addChild(shootingStar);
 
 
-    // Now modelLoc is valid here:
-    auto drawFunc = [&](const glm::mat4& model) {
-        glUseProgram(shaderProgram);    // optional, but ensure shader is active
-        glUniformMatrix4fv(modelLoc,1,GL_FALSE,glm::value_ptr(model));
-        glBindVertexArray(sphereVAO);
-        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
-    };
+  // Now modelLoc is valid here:
+  //root->drawFunc = [&](const glm::mat4& model) {
+    //glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+   // drawSphere();
 
-    sun->drawFunc = drawFunc;
-    planetA_body->drawFunc = drawFunc;
-    planetB->drawFunc = drawFunc;
-    moon->drawFunc = drawFunc;
-    shootingStar->drawFunc = drawFunc;
+root->drawFunc = [&](const glm::mat4& model) {
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, sunTexture);
+    //glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+
+    glBindVertexArray(sphereVAO);
+    glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+};
+
+  planet->drawFunc = root->drawFunc;
+  moon->drawFunc = root->drawFunc;
 
     // Time control factor
     float timeScale = 0.2f;
 
-    float deltaTime = 0.0f;
-    float simTime = 0.0f;
+  float deltaTime = 0.0f;
+  float lastFrame = 0.0f;
 
     // main render loop
     while (!glfwWindowShouldClose(window)) {
@@ -429,6 +470,11 @@ int main() {
         glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
 
+        // Draw the sphere (Yibo Tang removed these to avoid overlap of planet diplay)
+        //glBindVertexArray(sphereVAO);
+        //glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+        //glBindVertexArray(0);
+
         // Yibo Tang: Update transforms (hierarchical scene graph)
         // Sun self-rotation, with biggest scale
         glm::mat4 sunM = glm::rotate(glm::mat4(1.0f), scaledTime, glm::vec3(0,1,0))
@@ -448,33 +494,16 @@ int main() {
             * glm::translate(glm::mat4(1.0f), glm::vec3(PLANET_B_ORBIT_RADIUS,0,0))
             * glm::scale(glm::mat4(1.0f), glm::vec3(0.4f));
 
-        //Moon orbiting the planetA
-        float orbitM_speed = scaledTime * 0.4f;
-        glm::mat4 orbitM = glm::rotate(glm::mat4(1.0f), orbitM_speed, glm::vec3(0,1,0))
-                        * glm::translate(glm::mat4(1.0f), glm::vec3(MOON_ORBIT_RADIUS,0,0));
-        moon->localTransform = orbitM * glm::scale(glm::mat4(1.0f), glm::vec3(0.3f));
+        //Moon orbiting the planet
+        //glm::mat4 moonOrbit = glm::rotate(glm::mat4(1.0f), scaledTime * 0.4f, glm::vec3(0, 1, 0));
+        //moonOrbit = glm::translate(moonOrbit, glm::vec3(2.0f, 0.0f, 0.0f));
+        //moon->localTransform = glm::scale(moonOrbit, glm::vec3(0.5f));
 
-        // Draw planetA orbit (around origin)
-        glUniformMatrix4fv(modelLoc,1,GL_FALSE,glm::value_ptr(orbitA));
-        glUniform3f(glGetUniformLocation(shaderProgram,"objectColor"), 0.0f,0.4f,1.0f);
-        glBindVertexArray(planetAOrbitVAO);
-        glDrawArrays(GL_LINE_LOOP, 0, ORBIT_SEGMENTS+1);
-
-        // Draw planetB orbit
-        glUniformMatrix4fv(modelLoc,1,GL_FALSE,glm::value_ptr(orbitB));
-        glUniform3f(glGetUniformLocation(shaderProgram,"objectColor"), 1.0f,0.2f,0.2f);
-        glBindVertexArray(planetBOrbitVAO);
-        glDrawArrays(GL_LINE_LOOP, 0, ORBIT_SEGMENTS+1);
-
-        // compute moon ring transformation
-        glm::mat4 planetATrans = orbitA * glm::translate(glm::mat4(1.0f),glm::vec3(PLANET_A_ORBIT_RADIUS,0,0));
-        glm::mat4 moonRingM = planetATrans;
-
-        // Draw the orange moon orbit circle:
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(moonRingM));
-        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 0.5f, 0.0f);
-        glBindVertexArray(moonOrbitVAO);
-        glDrawArrays(GL_LINE_LOOP, 0, ORBIT_SEGMENTS+1);
+        // safer order: scale → rotate → translate
+        glm::mat4 moonTransform = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));
+        moonTransform = glm::rotate(moonTransform, scaledTime * 0.4f, glm::vec3(0, 1, 0));
+        moonTransform = glm::scale(moonTransform, glm::vec3(0.5f));
+        moon->localTransform = moonTransform;
 
         // Draw the trail of the shooting star
         glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 1.0f, 1.0f); // blue trail
