@@ -12,10 +12,11 @@ A mini solar system simulation featuring:
 - Two orbiting planets:
   - **Planet A**
   - **Planet B** with a **moon** (2-level hierarchy)
+- Shooting star, as a dynamic light source
 
 ### Features
-- Unique texture for each celestial body
-- Dynamic lighting and shadows
+- Unique textures for each celestial body
+- Dynamic lighting
 - Free-flying camera view
 
 ### Controls
@@ -36,8 +37,9 @@ Project1/
 │   └── fragmentShader.glsl
 ├── textures/
 │   ├── sun.jpg
-│   ├── planetA.jpg
-│   ├── planetB.jpg
+│   ├── planetA.jpg (earth)
+│   ├── planetB.jpg (mars)
+│   ├── galaxy.jpg
 │   └── moon.jpg
 ├── models/
 │   └── sphere.obj
@@ -46,7 +48,6 @@ Project1/
 │   ├── camera.h
 │   ├── Vertex.h
 │   └── SceneObjects.h
-├── stb_image.h
 ├── OBJloader.h
 └── compiled test program(s)
 ```

@@ -79,6 +79,16 @@ float timeSpeed          = 1.0f;
 const float normalSpeed  = 1.0f;
 const float fastSpeed    = 3.0f;
 
+//fine tune the speed of the simulation
+const float DAYS_PER_SECOND   = 1.0f;
+const float SUN_DAY           = 27.0f;   
+const float EARTH_DAY         = 1.0f;   
+const float EARTH_YEAR        = 365.0f; 
+const float MARS_DAY          = 1.03f;  
+const float MARS_YEAR         = 687.0f;  
+const float MOON_MONTH        = 27.3f;
+
+
 // Vertex structure for the sphere model
 std::vector<Vertex> sphereVertices;
 std::vector<unsigned int> sphereIndices;
@@ -211,8 +221,19 @@ void drawSphere() {
     //Load image using stb_image
     int width, height, nrChannels;
     unsigned char *data = stbi_load(filename, &width, &height, &nrChannels, 0);
+    
     if (data) {
-        GLenum format = (nrChannels == 3) ? GL_RGB : GL_RGBA;
+        GLenum format;
+        if (nrChannels == 1) format = GL_RED;
+        else if (nrChannels == 3) format = GL_RGB;
+        else if (nrChannels == 4) format = GL_RGBA;
+        else {
+            std::cerr << "Unsupported channel count in texture: " << filename << std::endl;
+            stbi_image_free(data);
+            return 0;
+        }
+        //std::cout << "Loaded texture " << filename << ": " << width << "x" << height << " Channels: " << nrChannels << std::endl;
+
         glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
         glGenerateMipmap(GL_TEXTURE_2D);
     } else {
@@ -220,6 +241,14 @@ void drawSphere() {
     }
     stbi_image_free(data);
     return textureID;
+}
+
+//clean up helper function
+ void deleteSceneGraph(SceneNode* node){
+    for (SceneNode* child : node->children) {
+        deleteSceneGraph(child);
+    }
+    delete node;
 }
 
 int main() {
@@ -267,7 +296,8 @@ int main() {
 
     // Load the Sun texture
     GLuint sunTexture = loadTexture("texture/sun.jpg");
-    GLuint earthTextture = loadTexture("texture/earth.jpg");
+    GLuint earthTexture = loadTexture("texture/earth.jpg");
+    GLuint marsTexture = loadTexture("texture/mars.jpg");
     GLuint moonTexture = loadTexture("texture/moon.jpg");
     GLuint galaxyTexture = loadTexture("texture/galaxy.jpg");
 
@@ -362,64 +392,77 @@ int main() {
     root->addChild(shootingStar);
 
 
-  // Now modelLoc is valid here:
-  //root->drawFunc = [&](const glm::mat4& model) {
+    // Now modelLoc is valid here:
+    //root->drawFunc = [&](const glm::mat4& model) {
     //glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-   // drawSphere();
+    // drawSphere();
 
-   // Galaxy follows camera and is very large
-   glm::mat4 galaxyTransform = glm::translate(glm::mat4(1.0f), camera.getPosition());
-   galaxyTransform = glm::scale(galaxyTransform, glm::vec3(50.0f)); // or 100.0f
-   galaxy->localTransform = galaxyTransform;
+    sun->drawFunc = [&](const glm::mat4& model) {
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), true);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), true);
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, sunTexture);
 
+        glBindVertexArray(sphereVAO);
+        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+    };
 
-    root->drawFunc = [&](const glm::mat4& model) {
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-    
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, sunTexture);
-    //glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
-
-    glBindVertexArray(sphereVAO);
-    glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
-};
     planetA_body->drawFunc = [&](const glm::mat4& model) {
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-    
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, earthTextture); // Earth texture here
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), true);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), true);
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, earthTexture); // Earth texture here
 
-    glBindVertexArray(sphereVAO);
-    glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
-};
+        glBindVertexArray(sphereVAO);
+        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+    };
 
- moon->drawFunc = [&](const glm::mat4& model) {
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-    
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, moonTexture); // Moon texture here
+    planetB->drawFunc = [&](const glm::mat4& model) {
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), true);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), true);
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, marsTexture); 
 
-    glBindVertexArray(sphereVAO);
-    glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
-};
- galaxy->drawFunc = [&](const glm::mat4& model) {
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+        glBindVertexArray(sphereVAO);
+        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+    };
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, galaxyTexture); // Use the galaxy texture
+    shootingStar->drawFunc = [&](const glm::mat4& model) {
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), true);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), false);
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 
-    glBindVertexArray(sphereVAO);
-    glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
-};
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, 0); // No texture for shooting star
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 1.0f, 1.0f);  // Set pure white color in shader
 
+        glBindVertexArray(sphereVAO);
+        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+    };
 
+    moon->drawFunc = [&](const glm::mat4& model) {
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), true);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), true);
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, moonTexture); // Moon texture here
 
-  //planet->drawFunc = root->drawFunc;
-  //moon->drawFunc = root->drawFunc;
+        glBindVertexArray(sphereVAO);
+        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+    };
+
 
     // Time control factor
     float timeScale = 0.2f;
@@ -446,8 +489,6 @@ int main() {
             timeSpeed     = timeControlOn ? fastSpeed : normalSpeed;
         }
         capsPressedLastFrame = capsPressedNow;
-        simTime += deltaTime *timeSpeed;
-        float scaledTime = simTime * timeScale;
 
         if (deltaTime > 0.01f)  // cap movement speed of wasd
             deltaTime = 0.01f;
@@ -480,6 +521,9 @@ int main() {
         // Update camera/view uniforms
         glm::vec3 camPos = camera.getPosition();
         glUniform3f(glGetUniformLocation(shaderProgram, "viewPos"), camPos.x, camPos.y, camPos.z);
+
+        // update galaxy transform every frame so it follows camera
+        galaxy->localTransform = glm::scale(glm::translate(glm::mat4(1.0f), camera.getPosition()), glm::vec3(50.0f));
 
         // Light 1: static top-right corner -ish
         glm::vec3 lightPos1 = glm::vec3(10.0f, 10.0f, 10.0f);
@@ -520,34 +564,41 @@ int main() {
         //glBindVertexArray(0);
 
         // Yibo Tang: Update transforms (hierarchical scene graph)
-        // Sun self-rotation, with biggest scale
-        glm::mat4 sunM = glm::rotate(glm::mat4(1.0f), scaledTime, glm::vec3(0,1,0))
-                    * glm::scale (glm::mat4(1.0f), glm::vec3(1.5f));
-        sun->localTransform = sunM;
+        simTime       += deltaTime * timeSpeed;
+        float simDays = simTime * DAYS_PER_SECOND;
 
-        // planetA orbiting the sun + self-rotation
-        float orbitA_speed = scaledTime * 0.1f;
-        glm::mat4 orbitA = glm::rotate(glm::mat4(1.0f), orbitA_speed, glm::vec3(0,1,0));
-        planetA_orbit->localTransform = orbitA * glm::translate(glm::mat4(1.0f), glm::vec3(PLANET_A_ORBIT_RADIUS,0,0));    
+        // Sun self-rotation (25 days per rotation)
+        float sunAngle = simDays / SUN_DAY * glm::two_pi<float>();
+        sun->localTransform =
+            glm::rotate(glm::mat4(1.0f), sunAngle, glm::vec3(0,1,0))
+        * glm::scale(glm::mat4(1.0f), glm::vec3(1.5f));
 
-        // planetB inner orbit and rotation
-        float orbitB_speed = scaledTime * 0.3f;
-        glm::mat4 orbitB = glm::rotate(glm::mat4(1.0f), orbitB_speed, glm::vec3(0,1,0));
+        // Earth orbit + spin
+        float earthOrbitAngle = simDays / EARTH_YEAR * glm::two_pi<float>();
+        planetA_orbit->localTransform =
+            glm::rotate(glm::mat4(1.0f), earthOrbitAngle, glm::vec3(0,1,0))
+        * glm::translate(glm::mat4(1.0f), glm::vec3(PLANET_A_ORBIT_RADIUS,0,0));
+        float earthSpinAngle = simDays / EARTH_DAY * glm::two_pi<float>();
+        planetA_body->localTransform =
+            glm::rotate(glm::mat4(1.0f), earthSpinAngle, glm::vec3(0,1,0));
+
+        // Mars orbit + spin
+        float marsOrbitAngle = simDays / MARS_YEAR * glm::two_pi<float>();
+        float marsSpinAngle  = simDays / MARS_DAY  * glm::two_pi<float>();   
+
         planetB->localTransform =
-            orbitB
+            glm::rotate(glm::mat4(1.0f), marsOrbitAngle, glm::vec3(0,1,0))
             * glm::translate(glm::mat4(1.0f), glm::vec3(PLANET_B_ORBIT_RADIUS,0,0))
+            * glm::rotate(glm::mat4(1.0f), marsSpinAngle,  glm::vec3(0,1,0))
             * glm::scale(glm::mat4(1.0f), glm::vec3(0.4f));
 
-        //Moon orbiting the planet
-        //glm::mat4 moonOrbit = glm::rotate(glm::mat4(1.0f), scaledTime * 0.4f, glm::vec3(0, 1, 0));
-        //moonOrbit = glm::translate(moonOrbit, glm::vec3(2.0f, 0.0f, 0.0f));
-        //moon->localTransform = glm::scale(moonOrbit, glm::vec3(0.5f));
-
-        // safer order: scale → rotate → translate
-        glm::mat4 moonTransform = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f));
-        moonTransform = glm::rotate(moonTransform, scaledTime * 0.4f, glm::vec3(0, 1, 0));
-        moonTransform = glm::scale(moonTransform, glm::vec3(0.5f));
-        moon->localTransform = moonTransform;
+        // Moon orbit around Earth
+        float moonOrbitAngle = simDays / MOON_MONTH * glm::two_pi<float>();
+        moon->localTransform =
+            glm::rotate(glm::mat4(1.0f), moonOrbitAngle, glm::vec3(0, 1, 0)) *
+            glm::translate(glm::mat4(1.0f), glm::vec3(MOON_ORBIT_RADIUS, 0, 0)) *
+            glm::rotate(glm::mat4(1.0f), moonOrbitAngle, glm::vec3(0, 1, 0)) *
+            glm::scale(glm::mat4(1.0f), glm::vec3(0.5f));
 
         // Draw the trail of the shooting star
         glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 1.0f, 1.0f); // blue trail
@@ -555,6 +606,62 @@ int main() {
         glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
         glBindVertexArray(trailVAO);
         glDrawArrays(GL_LINE_STRIP, 0, trailPositions.size());
+
+        // Draw galaxy background
+        glm::mat4 galaxyTransform = glm::scale(glm::translate(glm::mat4(1.0f), camera.getPosition()), glm::vec3(50.0f));
+        glDisable(GL_DEPTH_TEST);
+        glCullFace(GL_FRONT);
+
+        glUseProgram(shaderProgram);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), false);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), true);
+        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(galaxyTransform));
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, galaxyTexture);
+        glBindVertexArray(sphereVAO);
+        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+
+        // Restore state
+        glEnable(GL_DEPTH_TEST);
+        glCullFace(GL_BACK);
+        
+        // Draw orbit lines
+        glUseProgram(shaderProgram);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), false);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), false);
+        glDisable(GL_CULL_FACE);
+        glLineWidth(2.0f); 
+
+        // Planet A orbit (blue)
+        glm::mat4 planetAOrbitModel = glm::rotate(glm::mat4(1.0f),earthOrbitAngle,glm::vec3(0,1,0));
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(planetAOrbitModel));
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 0.0f, 0.0f, 1.0f);
+        glBindVertexArray(planetAOrbitVAO);
+        glDrawArrays(GL_LINE_LOOP, 0, planetAOrbitVertices.size());
+
+        // Planet B orbit (red)
+        glm::mat4 planetBOrbitModel = glm::rotate(glm::mat4(1.0f), marsOrbitAngle, glm::vec3(0,1,0));        
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(planetBOrbitModel));
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 0.0f, 0.0f);
+        glBindVertexArray(planetBOrbitVAO);
+        glDrawArrays(GL_LINE_LOOP, 0, planetBOrbitVertices.size());
+
+        // Moon orbit (orange)
+        glm::mat4 moonOrbitLineM = planetA_orbit->localTransform;
+        glBindVertexArray(moonOrbitVAO);
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 0.5f, 0.0f);
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(moonOrbitLineM));
+        glDrawArrays(GL_LINE_LOOP, 0, static_cast<GLsizei>(moonOrbitVertices.size()));
+
+        glBindVertexArray(0);
+        glEnable(GL_CULL_FACE);  // Re-enable culling
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), true);  //turn lighting back on
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), true);   //turn texture back on
+      
+        //reset object color to white for next draw calls
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 1.0f, 1.0f);
 
         // Draw the scene recursively, instead of draw sphere one by one, use root
         root->draw(glm::mat4(1.0f));
@@ -569,9 +676,9 @@ int main() {
         glfwPollEvents();
     }
 
-    // Clean
+    // Clean-up
+    deleteSceneGraph(root);
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
 }
-
