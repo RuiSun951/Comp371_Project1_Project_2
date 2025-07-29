@@ -13,7 +13,7 @@
 #include <unordered_map>
 #include "SceneNode.h" // from src/SceneNode.h
 #define STB_IMAGE_IMPLEMENTATION
-#include <stb/stb_image.h>
+#include "../stb/stb_image.h"
 
 
 
