@@ -1,4 +1,4 @@
-# COMP 371 – Project Assignment 1 (Summer 2025)
+# COMP 371 – Project Assignment 1&2 (Summer 2025)
 
 **Group Members:**  
 - Rui Sun (40121956)  
@@ -51,3 +51,12 @@ Project1/
 ├── OBJloader.h
 └── compiled test program(s)
 ```
+
+## Assignment 2
+
+### Updated requirement
+- complex object models for celestial body
+- dynamic lighting with 2 light sources
+- shadow map
+- loosen camera control, more movement
+- extra user interaction (shooter game style)
