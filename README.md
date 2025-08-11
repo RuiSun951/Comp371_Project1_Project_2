@@ -35,7 +35,7 @@ Project1/
 ├── shaders/
 │   ├── vertexShader.glsl
 │   └── fragmentShader.glsl
-├── textures/
+├── texture/
 │   ├── sun.jpg
 │   ├── planetA.jpg (earth)
 │   ├── planetB.jpg (mars)
@@ -72,23 +72,20 @@ Project2/
 │   ├── fragmentShader.glsl    # scene fragment shader
 │   ├── shadow_vertex.glsl     # shadow vertex shader
 │   └── shadow_fragment.glsl   # shadow fragment shader
-├── textures/
+├── texture/
 │   ├── sun.jpg
 │   ├── planetA.jpg (earth)
 │   ├── planetB.jpg (mars)
 │   ├── galaxy.jpg
 │   └── moon.jpg
 ├── models/
-│   ├── sphere.obj (used in project 1)
-│   ├── sun.obj
-│   ├── mars.obj
-│   ├── earth.obj
-│   └── moon.obj
+│   ├── sphere.obj (kept unchanged from project 1)
+│   └── satellite.obj (new complex model for project 2)
 ├── src/
 │   ├── main.cpp
 │   ├── camera.h
 │   ├── Vertex.h
 │   └── SceneObjects.h
 ├── OBJloader.h
-└── compiled test program(s)
+└── compiled test program(s): test...
 ```
