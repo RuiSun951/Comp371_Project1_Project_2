@@ -95,6 +95,12 @@ std::vector<Vertex> sphereVertices;
 std::vector<unsigned int> sphereIndices;
 GLuint sphereVAO, sphereVBO, sphereEBO;
 
+// Station mesh buffers
+std::vector<Vertex> stationVertices;
+std::vector<unsigned int> stationIndices;
+GLuint stationVAO = 0, stationVBO = 0, stationEBO = 0;
+
+
 // Orbit line variables declare
 // this is generating orbit traces for ez observation in testing
 const float PLANET_A_ORBIT_RADIUS = 5.0f;
@@ -193,6 +199,85 @@ bool loadSphereModel(const char *path) {
     return true;
 
 }
+
+bool loadModelToBuffers(const char* path,
+                        GLuint& VAO, GLuint& VBO, GLuint& EBO,
+                        std::vector<Vertex>& vertices,
+                        std::vector<unsigned int>& indices) {
+    std::vector<glm::vec3> positions, normals;
+    std::vector<glm::vec2> uvs;
+    std::vector<unsigned int> objIndices;
+
+    if (!loadOBJ(path, positions, normals, uvs, objIndices)) {
+        std::cerr << "Failed to load " << path << std::endl;
+        return false;
+    }
+
+    struct PackedVertex {
+        glm::vec3 position;
+        glm::vec3 normal;
+        glm::vec2 texCoord;
+        bool operator==(const PackedVertex& other) const {
+            return position == other.position &&
+                   normal == other.normal &&
+                   texCoord == other.texCoord;
+        }
+    };
+
+    struct Hasher {
+        size_t operator()(const PackedVertex& v) const {
+            size_t h1 = std::hash<float>()(v.position.x) ^ std::hash<float>()(v.position.y) ^ std::hash<float>()(v.position.z);
+            size_t h2 = std::hash<float>()(v.normal.x) ^ std::hash<float>()(v.normal.y) ^ std::hash<float>()(v.normal.z);
+            size_t h3 = std::hash<float>()(v.texCoord.x) ^ std::hash<float>()(v.texCoord.y);
+            return h1 ^ h2 ^ h3;
+        }
+    };
+
+    std::unordered_map<PackedVertex, unsigned int, Hasher> vertexToIndex;
+    vertices.clear();
+    indices.clear();
+
+    for (size_t i = 0; i < positions.size(); ++i) {
+        PackedVertex packed = {
+            positions[i],
+            (i < normals.size()) ? normals[i] : glm::vec3(0.0f),
+            (i < uvs.size()) ? uvs[i] : glm::vec2(0.0f)
+        };
+
+        auto it = vertexToIndex.find(packed);
+        if (it != vertexToIndex.end()) {
+            indices.push_back(it->second);
+        } else {
+            vertices.push_back({ packed.position, packed.texCoord, packed.normal });
+            unsigned int newIndex = static_cast<unsigned int>(vertices.size() - 1);
+            vertexToIndex[packed] = newIndex;
+            indices.push_back(newIndex);
+        }
+    }
+
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+
+    glBindVertexArray(VAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, texCoord));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, normal));
+    glEnableVertexAttribArray(2);
+
+    glBindVertexArray(0);
+    return true;
+}
+
 
 //set up camera
 bool tabPressedLastFrame = false;
@@ -355,12 +440,21 @@ int main() {
     GLuint marsTexture = loadTexture("texture/mars.jpg");
     GLuint moonTexture = loadTexture("texture/moon.jpg");
     GLuint galaxyTexture = loadTexture("texture/galaxy.jpg");
+    GLuint stationTexture = loadTexture("texture/Metal034.png"); 
+
 
 
     // Load the sphere model from OBJ file
     if (!loadSphereModel("models/sphere.obj")) {
         return -1; 
     }
+    // Loadd the spacestation model from OBJ file
+    if (!loadModelToBuffers("models/spacestation.obj",
+                        stationVAO, stationVBO, stationEBO,
+                        stationVertices, stationIndices)) {
+    std::cerr << "Failed to load spacestation.obj\n";
+}
+
 
     //set up orbit traces ellipses? circles
     for (int i = 0; i <= ORBIT_SEGMENTS; ++i) {
@@ -437,6 +531,39 @@ int main() {
     SceneNode* planetA_orbit = new SceneNode();
     SceneNode* planetA_body = new SceneNode();
     SceneNode* moon = new SceneNode();
+
+    SceneNode* station = new SceneNode();
+    planetA_body->addChild(station);  // attach to Earth
+
+ // initial size + offset from Earth
+ station->localTransform =
+    glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f)) *
+    glm::scale(glm::mat4(1.0f), glm::vec3(0.05f));
+
+ // draw
+//  station->drawFunc = [&](const glm::mat4& model){
+//     glUniform1i(glGetUniformLocation(shadowProgram, "useLighting"), true);
+//     glUniform1i(glGetUniformLocation(shadowProgram, "useTexture"), false);
+//     glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+//     glBindVertexArray(stationVAO);
+//     glDrawElements(GL_TRIANGLES, (GLsizei)stationIndices.size(), GL_UNSIGNED_INT, 0);
+//     glBindVertexArray(0);
+// };
+
+station->drawFunc = [&](const glm::mat4& model){
+    glUniform1i(glGetUniformLocation(shadowProgram, "useLighting"), true);
+    glUniform1i(glGetUniformLocation(shadowProgram, "useTexture"),  true); // enable texturing
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+
+    glActiveTexture(GL_TEXTURE0); // sampler 'texture1' is already set to 0 earlier
+    glBindTexture(GL_TEXTURE_2D, stationTexture);
+
+    glBindVertexArray(stationVAO);
+    glDrawElements(GL_TRIANGLES, (GLsizei)stationIndices.size(), GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+};
+
+
 
     root->addChild(sun);
     root->addChild(galaxy);
@@ -605,6 +732,17 @@ int main() {
             glm::lookAt(lp, lp + glm::vec3( 0, 0, 1), glm::vec3(0,-1, 0)), // +Z
             glm::lookAt(lp, lp + glm::vec3( 0, 0,-1), glm::vec3(0,-1, 0))  // -Z
         };
+
+        //Animate Orbit Around Earth
+        float r = 2.0f, w = glm::radians(10.0f), t = glfwGetTime();
+        station->localTransform =
+        glm::translate(glm::mat4(1.0f), glm::vec3(cos(t*w)*r, 0.0f, sin(t*w)*r)) *
+        glm::scale(glm::mat4(1.0f), glm::vec3(0.025f));
+
+
+
+        
+
 
         // Update shooting star's transform
         glm::mat4 starTransform = glm::translate(glm::mat4(1.0f), lightPos2);
