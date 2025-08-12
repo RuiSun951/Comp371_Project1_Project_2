@@ -58,9 +58,11 @@ Project1/
 - added a complex object model for celestial body (spacestation around earth)
 - update dynamic lighting with 2 light sources (shooting star and ceilling light)
 - implement shadows
+- Press `P` to toggle the background, for easier shadow observation (only active in view mode)
 - fine tuned camera control and mouse sensitivity
 - extra user interaction (eg: shooter game style)
 - game UI wrap, with obeservation mode and game mode
+- Press `L` to return upper menu in game UI
 
 ### Updated Folder Structure Assignment 2
 
@@ -75,21 +77,25 @@ Project2/
 │   ├── shadow_fragment.glsl        # shadow fragment shader
 │   ├── pointShadow_vertex.glsl     # point shadow vertex shader
 │   └── pointShadow_fragment.glsl   # point shadow fragment shader
-
 ├── texture/
 │   ├── sun.jpg
 │   ├── planetA.jpg (earth)
 │   ├── planetB.jpg (mars)
 │   ├── galaxy.jpg
+│   ├── metal.png
 │   └── moon.jpg
 ├── models/
 │   ├── sphere.obj (kept unchanged from project 1)
 │   └── spacestation.obj (new complex model for project 2)
 ├── src/
-│   ├── main.cpp
 │   ├── camera.h
+│   ├── gameUI.cpp
+│   ├── gameUI.h
+│   ├── main.cpp
 │   ├── Vertex.h
 │   └── SceneObjects.h
 ├── OBJloader.h
+├── stb/
+│   └── stb_image.h
 └── compiled test program(s): test...
 ```

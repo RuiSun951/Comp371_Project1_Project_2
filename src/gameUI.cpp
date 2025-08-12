@@ -3,7 +3,8 @@
 #include "gameUI.h"
 #include <cstdio>
 #include <vector>
-#include "../stb/stb_easy_font.h"   // tiny built‑in bitmap font
+#include <algorithm>
+#include "../stb/stb_easy_font.h"
 
 
 // ------- internal state -------
@@ -73,6 +74,46 @@ namespace {
     }
 
     bool prevMouseDown = false;
+    void buildTextTriangles(const char* text, float x, float y, std::vector<float>& outVerts, float& outW, float& outH){
+        outVerts.clear();
+        static unsigned char buf[200000];
+        int quads = stb_easy_font_print(0.0f, 0.0f, (char*)text, nullptr, buf, sizeof(buf));
+
+        float minx =  1e9f, miny =  1e9f;
+        float maxx = -1e9f, maxy = -1e9f;
+
+        // each quad has 4 verts; each vert is 16 bytes: float x,y then 8 bytes we ignore
+        for (int i = 0; i < quads; ++i) {
+            const unsigned char* q = buf + i * 4 * 16;
+
+            auto v2 = [&](int idx)->std::pair<float,float> {
+                const float* p = (const float*)(q + idx * 16);
+                return { p[0], p[1] };
+            };
+
+            auto [x0,y0] = v2(0);
+            auto [x1,y1] = v2(1);
+            auto [x2,y2] = v2(2);
+            auto [x3,y3] = v2(3);
+
+            // track bounds
+            minx = std::min(minx, std::min(std::min(x0,x1), std::min(x2,x3)));
+            maxx = std::max(maxx, std::max(std::max(x0,x1), std::max(x2,x3)));
+            miny = std::min(miny, std::min(std::min(y0,y1), std::min(y2,y3)));
+            maxy = std::max(maxy, std::max(std::max(y0,y1), std::max(y2,y3)));
+
+            // two triangles: (0,1,2) (0,2,3)
+            float tri[12] = { x0,y0, x1,y1, x2,y2,  x0,y0, x2,y2, x3,y3 };
+            // offset by desired x,y
+            for (int k = 0; k < 12; k += 2) {
+                outVerts.push_back(tri[k]   + x);
+                outVerts.push_back(tri[k+1] + y);
+            }
+        }
+
+        outW = (quads > 0) ? (maxx - minx) : 0.0f;
+        outH = (quads > 0) ? (maxy - miny) : 0.0f;
+    }
 }
 
 namespace UI {
@@ -104,11 +145,8 @@ void Shutdown() {
 }
 
 bool Button(GLFWwindow* window, float x, float y, float w, float h, bool enabled) {
-    // Framebuffer size in actual pixels (important for HiDPI)
-    int fbw = 0, fbh = 0;
-    glfwGetFramebufferSize(window, &fbw, &fbh);
+    int fbw = 0, fbh = 0; glfwGetFramebufferSize(window, &fbw, &fbh);
 
-    // Mouse pos in window coords → convert to framebuffer pixels
     double mx, my; glfwGetCursorPos(window, &mx, &my);
     int ww, wh; glfwGetWindowSize(window, &ww, &wh);
     float sx = ww ? (float)fbw / (float)ww : 1.0f;
@@ -117,25 +155,27 @@ bool Button(GLFWwindow* window, float x, float y, float w, float h, bool enabled
 
     bool hover = (mx >= x && mx <= x + w && my >= y && my <= y + h);
 
-    // Ortho projection with origin at top-left
     float proj[16];
     makeOrtho(0.0f, (float)fbw, 0.0f, (float)fbh, -1.0f, 1.0f, proj);
 
-    // Quad vertices (x,y) as TRIANGLE_FAN
     float verts[8] = { x, y,  x + w, y,  x + w, y + h,  x, y + h };
 
-    // Higher-contrast colors
+    // LIGHT GRAY fills for contrast
     float base[4];
     if (enabled) {
-        if (hover) { base[0]=0.18f; base[1]=0.60f; base[2]=1.00f; base[3]=1.0f; } // vibrant blue
-        else       { base[0]=0.09f; base[1]=0.22f; base[2]=0.55f; base[3]=1.0f; } // deep blue
+        if (hover) { base[0]=0.93f; base[1]=0.93f; base[2]=0.93f; base[3]=1.0f; } // hover
+        else       { base[0]=0.85f; base[1]=0.85f; base[2]=0.85f; base[3]=1.0f; } // idle
     } else {
-        base[0]=0.25f; base[1]=0.25f; base[2]=0.25f; base[3]=1.0f;
+        base[0]=0.70f; base[1]=0.70f; base[2]=0.70f; base[3]=1.0f;               // disabled
     }
+    float border[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 
-    float border[4];
-    if (hover) { border[0]=1.0f; border[1]=1.0f; border[2]=1.0f; border[3]=1.0f; }
-    else       { border[0]=0.0f; border[1]=0.0f; border[2]=0.0f; border[3]=1.0f; }
+    GLboolean depthWas = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean cullWas  = glIsEnabled(GL_CULL_FACE);
+    GLboolean depthMaskWas; glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMaskWas);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDepthMask(GL_FALSE);
 
     glUseProgram(uiProg);
     GLint locP = glGetUniformLocation(uiProg, "uProj");
@@ -146,93 +186,85 @@ bool Button(GLFWwindow* window, float x, float y, float w, float h, bool enabled
     glBindBuffer(GL_ARRAY_BUFFER, uiVBO);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
 
-    // Filled rect
+    // fill
     glUniform4fv(locC, 1, base);
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-
-    // Outline
+    // border
     glUniform4fv(locC, 1, border);
     glDrawArrays(GL_LINE_LOOP, 0, 4);
 
-    // Edge-triggered click
     bool down = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     bool clicked = (enabled && hover && down && !prevMouseDown);
     prevMouseDown = down;
+
+    // restore state
+    if (depthMaskWas) glDepthMask(GL_TRUE); else glDepthMask(GL_FALSE);
+    if (cullWas)  glEnable(GL_CULL_FACE);  else glDisable(GL_CULL_FACE);
+    if (depthWas) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+
     return clicked;
 }
 
 
-static void setProjForWindow(GLFWwindow* window, float proj[16]) {
-    int fbw=0, fbh=0; glfwGetFramebufferSize(window, &fbw, &fbh);
-    makeOrtho(0.0f, (float)fbw, 0.0f, (float)fbh, -1.0f, 1.0f, proj);
-}
+void Text(GLFWwindow* window, float x, float y, float w, float h, const char* text) {
+    int fbw = 0, fbh = 0; 
+    glfwGetFramebufferSize(window, &fbw, &fbh);
 
-void Text(GLFWwindow* window, float x, float y, const char* msg,
-          float r, float g, float b, float scale)
-{
-    if (!msg || !*msg) return;
+    // Build triangles at origin to measure unscaled size
+    std::vector<float> tri;
+    float tw = 0.0f, th = 0.0f;
+    buildTextTriangles(text, 0.0f, 0.0f, tri, tw, th);
 
-    // Generate quads with stb_easy_font (origin at top-left if we pass our y directly)
-    char quadBuf[10000];                     // enough for short labels
-    int numQuads = stb_easy_font_print(0.0f, 0.0f, (char*)msg, nullptr, quadBuf, sizeof(quadBuf));
-    if (numQuads <= 0) return;
+    // Guard against empty strings
+    if (tw <= 0.0f || th <= 0.0f || tri.empty()) return;
 
-    struct EV { float x, y; unsigned char rgba[4]; };
-    EV* qv = (EV*)quadBuf;                   // 4 vertices per quad
+    // Scale to fit inside the rect with 10% padding
+    const float margin = 0.90f; // 90% of rect
+    float s = margin * std::min(w / tw, h / th);
 
-    // Convert quads → triangles (two per quad) and apply x/y/scale
-    std::vector<float> verts;
-    verts.reserve(numQuads * 6 * 2);
-    for (int q = 0; q < numQuads; ++q) {
-        EV v0 = qv[q*4 + 0];
-        EV v1 = qv[q*4 + 1];
-        EV v2 = qv[q*4 + 2];
-        EV v3 = qv[q*4 + 3];
+    // Offset so scaled text is centered in the rect
+    float ox = x + (w - tw * s) * 0.5f;
+    float oy = y + (h - th * s) * 0.5f;
 
-        float p0x = x + v0.x * scale, p0y = y + v0.y * scale;
-        float p1x = x + v1.x * scale, p1y = y + v1.y * scale;
-        float p2x = x + v2.x * scale, p2y = y + v2.y * scale;
-        float p3x = x + v3.x * scale, p3y = y + v3.y * scale;
-
-        // tri 0: 0-1-2
-        verts.push_back(p0x); verts.push_back(p0y);
-        verts.push_back(p1x); verts.push_back(p1y);
-        verts.push_back(p2x); verts.push_back(p2y);
-        // tri 1: 0-2-3
-        verts.push_back(p0x); verts.push_back(p0y);
-        verts.push_back(p2x); verts.push_back(p2y);
-        verts.push_back(p3x); verts.push_back(p3y);
+    // Apply scale + offset
+    std::vector<float> tri2(tri.size());
+    for (size_t i = 0; i < tri.size(); i += 2) {
+        tri2[i + 0] = tri[i + 0] * s + ox;
+        tri2[i + 1] = tri[i + 1] * s + oy;
     }
 
-    float proj[16]; setProjForWindow(window, proj);
+    float proj[16];
+    makeOrtho(0.0f, (float)fbw, 0.0f, (float)fbh, -1.0f, 1.0f, proj);
+
+    // Draw on top: no depth/cull, don't write depth
+    GLboolean depthWas = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean cullWas  = glIsEnabled(GL_CULL_FACE);
+    GLboolean depthMaskWas; glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMaskWas);
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDepthMask(GL_FALSE);
 
     glUseProgram(uiProg);
     GLint locP = glGetUniformLocation(uiProg, "uProj");
     GLint locC = glGetUniformLocation(uiProg, "uColor");
     glUniformMatrix4fv(locP, 1, GL_FALSE, proj);
-    glUniform4f(locC, r, g, b, 1.0f);
+
+    // Opaque black text
+    float col[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    glUniform4fv(locC, 1, col);
 
     glBindVertexArray(uiVAO);
     glBindBuffer(GL_ARRAY_BUFFER, uiVBO);
-    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(), GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, tri2.size() * sizeof(float), tri2.data(), GL_DYNAMIC_DRAW);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
+    glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(tri2.size() / 2));
 
-    glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(verts.size() / 2));
-}
-
-void TextCenteredInRect(GLFWwindow* window, float x, float y, float w, float h,
-                        const char* msg, float r, float g, float b, float scale)
-{
-    if (!msg) return;
-    int tw = stb_easy_font_width((char*)msg);
-    int th = stb_easy_font_height((char*)msg);
-    float fw = tw * scale;
-    float fh = th * scale;
-
-    float tx = x + (w - fw) * 0.5f;
-    float ty = y + (h - fh) * 0.5f;
-    Text(window, tx, ty, msg, r, g, b, scale);
+    // Restore state
+    if (depthMaskWas) glDepthMask(GL_TRUE); else glDepthMask(GL_FALSE);
+    if (cullWas)  glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    if (depthWas) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
 }
 
 }

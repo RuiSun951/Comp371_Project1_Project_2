@@ -837,6 +837,17 @@ int main() {
             // Always show galaxy as background
             renderGalaxy = true;
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            
+            // bug fix: set view/proj before drawing the galaxy once
+            int fbw = 0, fbh = 0;
+            glfwGetFramebufferSize(window, &fbw, &fbh);
+            glm::mat4 viewM = camera.getViewMatrix();
+            glm::mat4 projM = glm::perspective(glm::radians(45.0f), (float)fbw / (float)fbh, 0.1f, 200.0f);
+            glUseProgram(sceneProgram);
+            glUniformMatrix4fv(uView, 1, GL_FALSE, glm::value_ptr(viewM));
+            glUniformMatrix4fv(uProj, 1, GL_FALSE, glm::value_ptr(projM));
+            glm::vec3 camPosM = camera.getPosition();
+            glUniform3f(uViewPos, camPosM.x, camPosM.y, camPosM.z);
 
             {
                 glm::mat4 galaxyTransform =
@@ -868,14 +879,17 @@ int main() {
             }
 
             // Two centered buttons (top = VIEW MODE, bottom = GAME MODE)
-            int fbw=0, fbh=0; glfwGetFramebufferSize(window, &fbw, &fbh);
-            float bw = 260.0f, bh = 60.0f;
+            fbw=0, fbh=0; glfwGetFramebufferSize(window, &fbw, &fbh);
+            float bw = 520.0f, bh = 120.0f;
             float cx = fbw * 0.5f - bw * 0.5f;
             float cy = fbh * 0.5f - bh * 0.5f;
             float pad = 20.0f;
 
             bool startView = UI::Button(window, cx, cy - (bh + pad), bw, bh, true);
             bool startGame = UI::Button(window, cx, cy + (bh + pad), bw, bh, true);
+
+            UI::Text(window, cx, cy - (bh + pad), bw, bh, "VIEW MODE");
+            UI::Text(window, cx, cy + (bh + pad), bw, bh, "GAME MODE");
 
             if (startView) {
                 appMode = AppMode::VIEW;
@@ -922,12 +936,18 @@ int main() {
         }
         tabPressedLastFrame = tabPressedNow;
 
-        // background galaxy toggle on/off with 'P'
-        bool pPressedNow = glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS;
-        if (pPressedNow && !pPressedLastFrame) {
-            renderGalaxy = !renderGalaxy;
+        // background galaxy toggle on/off with 'P' — only in VIEW mode
+        if (appMode == AppMode::VIEW) {
+            bool pPressedNow = glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS;
+            if (pPressedNow && !pPressedLastFrame) {
+                renderGalaxy = !renderGalaxy;
+            }
+            pPressedLastFrame = pPressedNow;
+        } else {
+            // consume current key state so returning to VIEW won't immediately toggle
+            pPressedLastFrame = (glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS);
         }
-        pPressedLastFrame = pPressedNow;
+
 
         bool lNow = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
         if (lNow && !lPressedLast) {
@@ -1205,39 +1225,40 @@ int main() {
         glBindVertexArray(trailVAO);
         glDrawArrays(GL_LINE_STRIP, 0, (GLsizei)trailPositions.size());
 
-        // Draw galaxy background
-        if (renderGalaxy) { 
-            glm::mat4 galaxyTransform = glm::scale(glm::translate(glm::mat4(1.0f), camera.getPosition()), glm::vec3(50.0f));
-            
+        // Draw galaxy background (inside-out sphere, front face culling)
+        if (renderGalaxy) {
+            int fbw = 0, fbh = 0;
+            glfwGetFramebufferSize(window, &fbw, &fbh);
+
+            glm::mat4 view = camera.getViewMatrix();
+            glm::mat4 proj = glm::perspective(glm::radians(45.0f),  (float)fbw / (float)fbh, 0.1f, 200.0f);
+
+            glUseProgram(sceneProgram);
+            glUniformMatrix4fv(uView, 1, GL_FALSE, glm::value_ptr(view));
+            glUniformMatrix4fv(uProj, 1, GL_FALSE, glm::value_ptr(proj));
+
+            glm::vec3 camPos = camera.getPosition();
+            glUniform3f(uViewPos, camPos.x, camPos.y, camPos.z);
+
+            glm::mat4 galaxyTransform = glm::scale(glm::translate(glm::mat4(1.0f), camPos), glm::vec3(50.0f));
+
             glDisable(GL_DEPTH_TEST);
             glCullFace(GL_FRONT);
 
-            glUseProgram(sceneProgram);
             glUniform1i(uUseLighting, 0);
             glUniform1i(uUseTexture,  1);
+            glUniform1i(uReceiveShadows, 0);
             glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(galaxyTransform));
 
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, galaxyTexture);
 
             glBindVertexArray(sphereVAO);
-            glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+            glDrawElements(GL_TRIANGLES, (GLsizei)sphereIndices.size(), GL_UNSIGNED_INT, 0);
             glBindVertexArray(0);
 
-            // Restore state
             glEnable(GL_DEPTH_TEST);
             glCullFace(GL_BACK);
-        } else{
-            glUseProgram(sceneProgram);
-            glUniform1i(uUseLighting, 1);
-            glUniform1i(uUseTexture,  0);
-            glUniform1i(uReceiveShadows, 1);
-            glUniform3f(uObjectColor, 0.92f, 0.92f, 0.92f); // light gray
-            glm::mat4 M = glm::mat4(1.0f);
-            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(M));
-            glBindVertexArray(groundVAO);
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-            glBindVertexArray(0);
         }
         
         // Draw orbit lines
