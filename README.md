@@ -54,12 +54,13 @@ Project1/
 
 ## Assignment 2
 
-### Updated requirement
-- complex object models for celestial bodies
-- dynamic lighting with 2 light sources
-- shadow map
-- loosen requirement for camera control, more potential movements
+### Updated feature
+- added a complex object model for celestial body (spacestation around earth)
+- update dynamic lighting with 2 light sources (shooting star and ceilling light)
+- implement shadows
+- fine tuned camera control and mouse sensitivity
 - extra user interaction (eg: shooter game style)
+- game UI wrap, with obeservation mode and game mode
 
 ### Updated Folder Structure Assignment 2
 
@@ -68,10 +69,13 @@ Project2/
 ├── README.md
 ├── .gitignore
 ├── shaders/
-│   ├── vertexShader.glsl      # scene vertex shader
-│   ├── fragmentShader.glsl    # scene fragment shader
-│   ├── shadow_vertex.glsl     # shadow vertex shader
-│   └── shadow_fragment.glsl   # shadow fragment shader
+│   ├── vertexShader.glsl           # scene vertex shader
+│   ├── fragmentShader.glsl         # scene fragment shader
+│   ├── shadow_vertex.glsl          # shadow vertex shader
+│   ├── shadow_fragment.glsl        # shadow fragment shader
+│   ├── pointShadow_vertex.glsl     # point shadow vertex shader
+│   └── pointShadow_fragment.glsl   # point shadow fragment shader
+
 ├── texture/
 │   ├── sun.jpg
 │   ├── planetA.jpg (earth)
@@ -80,7 +84,7 @@ Project2/
 │   └── moon.jpg
 ├── models/
 │   ├── sphere.obj (kept unchanged from project 1)
-│   └── satellite.obj (new complex model for project 2)
+│   └── spacestation.obj (new complex model for project 2)
 ├── src/
 │   ├── main.cpp
 │   ├── camera.h

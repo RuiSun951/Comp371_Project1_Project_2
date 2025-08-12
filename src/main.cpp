@@ -8,14 +8,16 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtx/quaternion.inl>
 #include "camera.h" // from src/camera.h
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
 #include "SceneNode.h" // from src/SceneNode.h
+#include <cmath>
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "../stb/stb_image.h"
-#include <cmath>
 #include "GameUI.h"
 
 
@@ -82,6 +84,10 @@ float timeSpeed          = 1.0f;
 const float normalSpeed  = 1.0f;
 const float fastSpeed    = 3.0f;
 
+// background galaxy toggle
+bool pPressedLastFrame = false;
+bool renderGalaxy      = true;
+
 //fine tune the speed of the simulation
 const float DAYS_PER_SECOND   = 1.0f;
 const float SUN_DAY           = 27.0f;   
@@ -124,6 +130,8 @@ std::vector<glm::vec3> trailPositions;
 const int TRAIL_LENGTH=300;
 GLuint trailVAO, trailVBO;
 
+//ground plane VAO,VBO,EBO for vasting shadows on
+GLuint groundVAO=0, groundVBO=0, groundEBO=0;
 
 // Load the sphere model from an OBJ file
 bool loadSphereModel(const char *path) {
@@ -303,7 +311,8 @@ void drawSphereDepth(GLuint prog, const glm::mat4& M, GLuint modelLocShadow){
 }
 
 // Yibo Tang: Insert the texture
-    GLuint loadTexture(const char* filename) {
+GLuint loadTexture(const char* filename) {   
+    stbi_set_flip_vertically_on_load(true); // Flip the image vertically
     GLuint textureID;
     glGenTextures(1, &textureID);
     glBindTexture(GL_TEXTURE_2D, textureID);
@@ -328,7 +337,7 @@ void drawSphereDepth(GLuint prog, const glm::mat4& M, GLuint modelLocShadow){
             stbi_image_free(data);
             return 0;
         }
-        //std::cout << "Loaded texture " << filename << ": " << width << "x" << height << " Channels: " << nrChannels << std::endl;
+        std::cout << "Loaded texture " << filename << ": " << width << "x" << height << " Channels: " << nrChannels << std::endl;
 
         glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
         glGenerateMipmap(GL_TEXTURE_2D);
@@ -347,6 +356,39 @@ void drawSphereDepth(GLuint prog, const glm::mat4& M, GLuint modelLocShadow){
     delete node;
 }
 
+//spacestation obj model debug helper fuctions
+static bool hasAnyUVs(const std::vector<Vertex>& v){
+    for (const auto& x : v) if (x.texCoord.x != 0.0f || x.texCoord.y != 0.0f) return true;
+    return false;
+}
+static bool hasAnyNormals(const std::vector<Vertex>& v){
+    for (const auto& x : v) if (glm::dot(x.normal , x.normal) > 1e-10f) return true;
+    return false;
+}
+static void generateSphericalUVs(std::vector<Vertex>& v){
+    for (auto& x : v){
+        glm::vec3 p = glm::normalize(x.position);
+        float u = 0.5f + atan2f(p.z, p.x) / (2.0f * glm::pi<float>());
+        float vcoord = 0.5f - asinf(p.y) / glm::pi<float>();
+        x.texCoord = glm::vec2(u, vcoord);
+    }
+}
+static void recomputeNormals(std::vector<Vertex>& v, const std::vector<unsigned int>& idx){
+    for (auto& x : v) x.normal = glm::vec3(0.0f);
+    for (size_t i = 0; i + 2 < idx.size(); i += 3){
+        Vertex& a = v[idx[i+0]];
+        Vertex& b = v[idx[i+1]];
+        Vertex& c = v[idx[i+2]];
+        glm::vec3 n = glm::normalize(glm::cross(b.position - a.position, c.position - a.position));
+        if (!std::isfinite(n.x)) continue;
+        a.normal += n; b.normal += n; c.normal += n;
+    }
+    for (auto& x : v){
+        float L2 = glm::dot(x.normal, x.normal);
+        x.normal = (L2 > 1e-12f) ? glm::normalize(x.normal) : glm::vec3(0,1,0);
+    }
+}
+
 int main() {
     // Initialize OpenGL context, GLEW, etc. here...
     if (!glfwInit()) {
@@ -355,7 +397,7 @@ int main() {
     }
 
     // Create a window
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Mini Solar System", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(1200, 900, "Mini Solar System", nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create GLFW window\n";
         glfwTerminate();
@@ -430,11 +472,34 @@ int main() {
     // Create scene shader program
     GLuint sceneProgram = createShaderProgram("shaders/vertexShader.glsl", "shaders/fragmentShader.glsl");
     glUseProgram(sceneProgram);
-    
-    //Yibo Tang Set texture sampler uniform to texture unit 0
-    glUniform1i(glGetUniformLocation(sceneProgram, "texture1"), 0);
 
-    glUniform3f(glGetUniformLocation(sceneProgram, "objectColor"), 0.4f, 0.6f, 1.0f);
+    // uniform declareation for sceneProgram
+    const GLint uModel        = glGetUniformLocation(sceneProgram, "model");
+    const GLint uView         = glGetUniformLocation(sceneProgram, "view");
+    const GLint uProj         = glGetUniformLocation(sceneProgram, "projection");
+    const GLint uUseLighting  = glGetUniformLocation(sceneProgram, "useLighting");
+    const GLint uUseTexture   = glGetUniformLocation(sceneProgram, "useTexture");
+    const GLint uViewPos      = glGetUniformLocation(sceneProgram, "viewPos");
+    const GLint uObjectColor  = glGetUniformLocation(sceneProgram, "objectColor");
+
+    const GLint uLightPos1    = glGetUniformLocation(sceneProgram, "lightPos1");
+    const GLint uLightColor1  = glGetUniformLocation(sceneProgram, "lightColor1");
+    const GLint uLightPos2    = glGetUniformLocation(sceneProgram, "lightPos2");
+    const GLint uLightColor2  = glGetUniformLocation(sceneProgram, "lightColor2");
+
+    const GLint uLightSpace   = glGetUniformLocation(sceneProgram, "lightSpaceMatrix");
+    const GLint uFarPlane2    = glGetUniformLocation(sceneProgram, "farPlane2");
+
+    // Samplers
+    const GLint uTex1         = glGetUniformLocation(sceneProgram, "texture1");
+    const GLint uShadowMap    = glGetUniformLocation(sceneProgram, "shadowMap");
+    const GLint uShadowCube2  = glGetUniformLocation(sceneProgram, "shadowCube2");
+    const GLint uReceiveShadows = glGetUniformLocation(sceneProgram, "receiveShadows");
+
+    // Set fixed sampler bindings
+    glUniform1i(uTex1,        0); // GL_TEXTURE0
+    glUniform1i(uShadowMap,   1); // GL_TEXTURE1
+    glUniform1i(uShadowCube2, 2); // GL_TEXTURE2
 
     // Load the Sun texture
     GLuint sunTexture = loadTexture("texture/sun.jpg");
@@ -442,8 +507,6 @@ int main() {
     GLuint marsTexture = loadTexture("texture/mars.jpg");
     GLuint moonTexture = loadTexture("texture/moon.jpg");
     GLuint galaxyTexture = loadTexture("texture/galaxy.jpg");
-    GLuint stationTexture = loadTexture("texture/Metal034.png"); 
-
 
 
     // Load the sphere model from OBJ file
@@ -451,12 +514,26 @@ int main() {
         return -1; 
     }
     // Loadd the spacestation model from OBJ file
-    if (!loadModelToBuffers("models/spacestation.obj",
-                        stationVAO, stationVBO, stationEBO,
-                        stationVertices, stationIndices)) {
-    std::cerr << "Failed to load spacestation.obj\n";
-}
-
+    if (!loadModelToBuffers("models/spacestation.obj", stationVAO, stationVBO, stationEBO, stationVertices, stationIndices)) {
+        std::cerr << "Failed to load spacestation.obj\n";
+    }
+    
+    // --- Fixup station data if OBJ lacked normals/UVs or indices didn't align ---
+    bool needReupload = false;
+    if (!hasAnyNormals(stationVertices)) {
+        recomputeNormals(stationVertices, stationIndices);
+        needReupload = true;
+    }
+    if (!hasAnyUVs(stationVertices)) {
+        generateSphericalUVs(stationVertices); // quick & decent for rounded shapes
+        needReupload = true;
+    }
+    if (needReupload) {
+        glBindBuffer(GL_ARRAY_BUFFER, stationVBO);
+        glBufferSubData(GL_ARRAY_BUFFER, 0,
+            stationVertices.size() * sizeof(Vertex), stationVertices.data());
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
 
     //set up orbit traces ellipses? circles
     for (int i = 0; i <= ORBIT_SEGMENTS; ++i) {
@@ -509,8 +586,39 @@ int main() {
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
 
+    {
+        struct GVert { glm::vec3 p; glm::vec2 uv; glm::vec3 n; };
+        const float S=100.f, Y=-1.f;
+        GVert v[4] = {
+            {{-S,Y,-S},{0,0},{0,1,0}},
+            {{ S,Y,-S},{1,0},{0,1,0}},
+            {{ S,Y, S},{1,1},{0,1,0}},
+            {{-S,Y, S},{0,1},{0,1,0}},
+        };
+        unsigned int idx[6]={0,1,2, 0,2,3};
+
+        glGenVertexArrays(1,&groundVAO);
+        glGenBuffers(1,&groundVBO);
+        glGenBuffers(1,&groundEBO);
+
+        glBindVertexArray(groundVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, groundVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_STATIC_DRAW);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, groundEBO);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(idx), idx, GL_STATIC_DRAW);
+
+        glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(GVert),(void*)offsetof(GVert,p));
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,sizeof(GVert),(void*)offsetof(GVert,uv));
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(2,3,GL_FLOAT,GL_FALSE,sizeof(GVert),(void*)offsetof(GVert,n));
+        glEnableVertexAttribArray(2);
+
+        glBindVertexArray(0);
+    }
+
     // Set background color
-    glClearColor(0.1f, 0.1f, 0.1f, 1.0f); // Dark gray
+    glClearColor(1.0f, 1.0f, 1.0f, 1.0f); // pure white background
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);    //disable cursor
 
 
@@ -521,9 +629,6 @@ int main() {
         -90.0f,                       // yaw
         0.0f                          // pitch
     );
-   // static float lastFrame = 0.0f;
-
-   GLuint modelLoc = glGetUniformLocation(sceneProgram, "model");
 
     SceneNode* root = new SceneNode();  //identity node
     SceneNode* galaxy = new SceneNode();
@@ -533,45 +638,19 @@ int main() {
     SceneNode* planetA_orbit = new SceneNode();
     SceneNode* planetA_body = new SceneNode();
     SceneNode* moon = new SceneNode();
-
     SceneNode* station = new SceneNode();
-    planetA_body->addChild(station);  // attach to Earth
 
- // initial size + offset from Earth
- station->localTransform =
-    glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f)) *
-    glm::scale(glm::mat4(1.0f), glm::vec3(0.05f));
-
- // draw
- station->drawFunc = [&](const glm::mat4& model){
-    glUniform1i(glGetUniformLocation(shadowProgram, "useLighting"), true);
-    glUniform1i(glGetUniformLocation(shadowProgram, "useTexture"), false);
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-    glBindVertexArray(stationVAO);
-    glDrawElements(GL_TRIANGLES, (GLsizei)stationIndices.size(), GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
-};
-
-// station->drawFunc = [&](const glm::mat4& model){
-//     glUniform1i(glGetUniformLocation(shadowProgram, "useLighting"), true);
-//     glUniform1i(glGetUniformLocation(shadowProgram, "useTexture"),  true); // enable texturing
-//     glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-
-//     glActiveTexture(GL_TEXTURE0); // sampler 'texture1' is already set to 0 earlier
-//     //glBindTexture(GL_TEXTURE_2D, stationTexture);
-
-//     glBindVertexArray(stationVAO);
-//     glDrawElements(GL_TRIANGLES, (GLsizei)stationIndices.size(), GL_UNSIGNED_INT, 0);
-//     glBindVertexArray(0);
-// };
-
-
+    // initial size + offset from Earth
+    station->localTransform =
+        glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f)) *
+        glm::scale(glm::mat4(1.0f), glm::vec3(0.05f));
 
     root->addChild(sun);
     root->addChild(galaxy);
     root->addChild(planetA_orbit);
     planetA_orbit ->addChild(planetA_body);
     planetA_orbit ->addChild(moon);
+    planetA_body ->addChild(station);  // attach to Earth
     root->addChild(planetB);
     root->addChild(shootingStar);
 
@@ -582,10 +661,13 @@ int main() {
     // drawSphere();
 
     sun->drawFunc = [&](const glm::mat4& model) {
-        glUniform1i(glGetUniformLocation(sceneProgram, "useLighting"), true);
-        glUniform1i(glGetUniformLocation(sceneProgram, "useTexture"), true);
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-        
+        glUseProgram(sceneProgram);
+        glUniform1i(uUseLighting, 0);   // light source, no lighting
+        glUniform1i(uUseTexture,  1);
+        glUniform1i(uReceiveShadows, 0);    // do not receive shadows
+        glUniform3f(uObjectColor, 1.0f, 1.0f, 1.0f);      // reset tint
+        glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(model));
+
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, sunTexture);
 
@@ -594,13 +676,17 @@ int main() {
         glBindVertexArray(0);
     };
 
+
     planetA_body->drawFunc = [&](const glm::mat4& model) {
-        glUniform1i(glGetUniformLocation(sceneProgram, "useLighting"), true);
-        glUniform1i(glGetUniformLocation(sceneProgram, "useTexture"), true);
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-        
+        glUseProgram(sceneProgram);
+        glUniform1i(uUseLighting, 1);
+        glUniform1i(uUseTexture,  1);
+        glUniform1i(uReceiveShadows, 1);
+        glUniform3f(uObjectColor, 1.0f, 1.0f, 1.0f);      // reset tint
+        glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(model));
+
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, earthTexture); // Earth texture here
+        glBindTexture(GL_TEXTURE_2D, earthTexture);
 
         glBindVertexArray(sphereVAO);
         glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
@@ -608,12 +694,15 @@ int main() {
     };
 
     planetB->drawFunc = [&](const glm::mat4& model) {
-        glUniform1i(glGetUniformLocation(sceneProgram, "useLighting"), true);
-        glUniform1i(glGetUniformLocation(sceneProgram, "useTexture"), true);
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-        
+        glUseProgram(sceneProgram);
+        glUniform1i(uUseLighting, 1);
+        glUniform1i(uUseTexture,  1);
+        glUniform1i(uReceiveShadows, 1);
+        glUniform3f(uObjectColor, 1.0f, 1.0f, 1.0f);      // reset tint
+        glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(model));
+
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, marsTexture); 
+        glBindTexture(GL_TEXTURE_2D, marsTexture);
 
         glBindVertexArray(sphereVAO);
         glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
@@ -621,13 +710,13 @@ int main() {
     };
 
     shootingStar->drawFunc = [&](const glm::mat4& model) {
-        glUniform1i(glGetUniformLocation(sceneProgram, "useLighting"), true);
-        glUniform1i(glGetUniformLocation(sceneProgram, "useTexture"), false);
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, 0); // No texture for shooting star
-        glUniform3f(glGetUniformLocation(sceneProgram, "objectColor"), 1.0f, 1.0f, 1.0f);  // Set pure white color in shader
+        glUseProgram(sceneProgram);
+        glUniform1i(uUseLighting, 0); // light source, no lighting
+        glUniform1i(uReceiveShadows, 0); // do not receive shadows
+        glUniform1i(uUseTexture,  0);
+        glUniform3f(uObjectColor, 1.0f, 1.0f, 1.0f);      // reset tint
+        glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(model));
+        glUniform3f(uObjectColor, 1.0f, 1.0f, 1.0f);
 
         glBindVertexArray(sphereVAO);
         glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
@@ -635,18 +724,38 @@ int main() {
     };
 
     moon->drawFunc = [&](const glm::mat4& model) {
-        glUniform1i(glGetUniformLocation(sceneProgram, "useLighting"), true);
-        glUniform1i(glGetUniformLocation(sceneProgram, "useTexture"), true);
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-        
+        glUseProgram(sceneProgram);
+        glUniform1i(uUseLighting, 1);
+        glUniform1i(uUseTexture,  1);
+        glUniform1i(uReceiveShadows, 1);
+        glUniform3f(uObjectColor, 1.0f, 1.0f, 1.0f);      // reset tint
+        glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(model));
+
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, moonTexture); // Moon texture here
+        glBindTexture(GL_TEXTURE_2D, moonTexture);
 
         glBindVertexArray(sphereVAO);
         glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
     };
 
+    station->drawFunc = [&](const glm::mat4& model){
+        glUseProgram(sceneProgram);
+        glUniform1i(uUseLighting, 1);
+        glUniform1i(uUseTexture,  0); //no texture
+        glUniform1i(uReceiveShadows, 1);
+        glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(model));
+
+        float t = (float)glfwGetTime();
+        glm::vec3 color = 0.5f + 0.5f * glm::vec3(
+            sin(t*1.7f), sin(t*2.3f + 1.0f), sin(t*2.9f + 2.0f));
+        glUniform3f(uObjectColor, color.x, color.y, color.z);
+
+        // do NOT bind stationTexture anymore
+        glBindVertexArray(stationVAO);
+        glDrawElements(GL_TRIANGLES, (GLsizei)stationIndices.size(), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+    };
 
     // Time control factor
     float timeScale = 0.2f;
@@ -656,6 +765,9 @@ int main() {
 
     // main render loop
     while (!glfwWindowShouldClose(window)) {
+
+        if (renderGalaxy) glClearColor(0.10f, 0.10f, 0.10f, 1.0f);   // dark gray when galaxy on, for immersive background
+        else              glClearColor(0.25f, 0.25f, 0.25f, 1.0f);
 
         // Clear screen
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -686,6 +798,12 @@ int main() {
         }
         tabPressedLastFrame = tabPressedNow;
 
+        // background galaxy toggle on/off with 'P'
+        bool pPressedNow = glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS;
+        if (pPressedNow && !pPressedLastFrame) {
+            renderGalaxy = !renderGalaxy;
+        }
+        pPressedLastFrame = pPressedNow;
 
         // Create transformation matrices
         glm::mat4 model = glm::mat4(1.0f); // identity
@@ -696,14 +814,11 @@ int main() {
             0.1f,
             100.0f
         );
-
-        // Send to shader
-        GLuint viewLoc = glGetUniformLocation(sceneProgram, "view");
-        GLuint projLoc = glGetUniformLocation(sceneProgram, "projection");
+        glUseProgram(sceneProgram);
 
         // Update camera/view uniforms
         glm::vec3 camPos = camera.getPosition();
-        glUniform3f(glGetUniformLocation(sceneProgram, "viewPos"), camPos.x, camPos.y, camPos.z);
+        glUniform3f(uViewPos, camPos.x, camPos.y, camPos.z);
 
         // update galaxy transform every frame so it follows camera
         galaxy->localTransform = glm::scale(glm::translate(glm::mat4(1.0f), camera.getPosition()), glm::vec3(50.0f));
@@ -718,7 +833,7 @@ int main() {
         glm::vec3 lightColor2 = glm::vec3(1.0f, 1.0f, 1.0f);  // shooting star bright full white for better seeing in testing
 
         // build light-space matrix for light 1 shadow (from lightPos1 toward origin)
-        glm::mat4 lightProj = glm::ortho(-20.0f, 20.0f, -20.0f, 20.0f, 0.1f, 60.0f);
+        glm::mat4 lightProj = glm::ortho(-30.0f, 30.0f, -30.0f, 30.0f, 0.1f, 60.0f);
         glm::mat4 lightView = glm::lookAt(lightPos1, glm::vec3(0,0,0), glm::vec3(0,1,0));
         glm::mat4 lightSpaceMatrix = lightProj * lightView;
 
@@ -741,11 +856,6 @@ int main() {
         glm::translate(glm::mat4(1.0f), glm::vec3(cos(t*w)*r, 0.0f, sin(t*w)*r)) *
         glm::scale(glm::mat4(1.0f), glm::vec3(0.025f));
 
-
-
-        
-
-
         // Update shooting star's transform
         glm::mat4 starTransform = glm::translate(glm::mat4(1.0f), lightPos2);
         starTransform = glm::scale(starTransform, glm::vec3(0.1f));
@@ -759,16 +869,15 @@ int main() {
         glBindBuffer(GL_ARRAY_BUFFER, trailVBO);
         glBufferSubData(GL_ARRAY_BUFFER, 0, trailPositions.size() * sizeof(glm::vec3), trailPositions.data());
 
-
         // upload 2 lights to shader
-        glUniform3fv(glGetUniformLocation(sceneProgram, "lightPos1"), 1, glm::value_ptr(lightPos1));
-        glUniform3fv(glGetUniformLocation(sceneProgram, "lightColor1"), 1, glm::value_ptr(lightColor1));
-        glUniform3fv(glGetUniformLocation(sceneProgram, "lightPos2"), 1, glm::value_ptr(lightPos2));
-        glUniform3fv(glGetUniformLocation(sceneProgram, "lightColor2"), 1, glm::value_ptr(lightColor2));
+        glUniform3fv(uLightPos1,   1, glm::value_ptr(lightPos1));
+        glUniform3fv(uLightColor1, 1, glm::value_ptr(lightColor1));
+        glUniform3fv(uLightPos2,   1, glm::value_ptr(lightPos2));
+        glUniform3fv(uLightColor2, 1, glm::value_ptr(lightColor2));
 
         // Update transformation matrices
-        glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
+        glUniformMatrix4fv(uView, 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(uProj, 1, GL_FALSE, glm::value_ptr(projection));
 
         // Draw the sphere (Yibo Tang removed these to avoid overlap of planet diplay)
         //glBindVertexArray(sphereVAO);
@@ -822,8 +931,11 @@ int main() {
         glViewport(0, 0, SHADOW_W, SHADOW_H);
         glBindFramebuffer(GL_FRAMEBUFFER, depthFBO);
         glClear(GL_DEPTH_BUFFER_BIT);
-
         glUseProgram(shadowProgram);
+
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(1.5f, 3.0f);
+
         glUniformMatrix4fv(glGetUniformLocation(shadowProgram, "lightSpaceMatrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
         GLuint modelLocShadow = glGetUniformLocation(shadowProgram, "model");
 
@@ -846,22 +958,39 @@ int main() {
         glUniformMatrix4fv(modelLocShadow, 1, GL_FALSE, glm::value_ptr(moonGlobal));
         glDrawElements(GL_TRIANGLES, (GLsizei)sphereIndices.size(), GL_UNSIGNED_INT, 0);
 
+        // Space station shadow
+        glUniformMatrix4fv(modelLocShadow, 1, GL_FALSE, glm::value_ptr(station->getGlobalTransform()));
+        glBindVertexArray(stationVAO);
+        glDrawElements(GL_TRIANGLES, (GLsizei)stationIndices.size(), GL_UNSIGNED_INT, 0);
+        
+        //ground
+        if (!renderGalaxy) {
+            glm::mat4 M = glm::mat4(1.0f);
+            glUniformMatrix4fv(modelLocShadow, 1, GL_FALSE, glm::value_ptr(M));
+            glBindVertexArray(groundVAO);
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        }
+        
+        glDisable(GL_POLYGON_OFFSET_FILL);
+
         glBindVertexArray(0);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0); 
 
         // SHADOW DEPTH PASS: LIGHT 2 (shooting star)
         glViewport(0, 0, SHADOW_W, SHADOW_H);
         glBindFramebuffer(GL_FRAMEBUFFER, depthCubeFBO);
         glUseProgram(pointShadowProgram);
 
-        GLint uVP       = glGetUniformLocation(pointShadowProgram, "vp");
-        GLint uModel    = glGetUniformLocation(pointShadowProgram, "model");
-        GLint uLightPos = glGetUniformLocation(pointShadowProgram, "lightPos");
-        GLint uFarPlane = glGetUniformLocation(pointShadowProgram, "farPlane");
+        GLint uVP_PL       = glGetUniformLocation(pointShadowProgram, "vp");
+        GLint uModel_PL    = glGetUniformLocation(pointShadowProgram, "model");
+        GLint uLightPos_PL = glGetUniformLocation(pointShadowProgram, "lightPos");
+        GLint uFarPlane_PL = glGetUniformLocation(pointShadowProgram, "farPlane");
 
-        glUniform3fv(uLightPos, 1, glm::value_ptr(lp));
-        glUniform1f(uFarPlane, farPL);
-        glCullFace(GL_FRONT); // reduce acne
+        glUniform3fv(uLightPos_PL, 1, glm::value_ptr(lp));
+        glUniform1f(uFarPlane_PL, farPL);
+
+        glDisable(GL_CULL_FACE);
+        glEnable(GL_DEPTH_TEST);
 
         for (int face = 0; face < 6; ++face) {
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
@@ -869,29 +998,43 @@ int main() {
             glClear(GL_DEPTH_BUFFER_BIT);
 
             glm::mat4 vp = shadowProj2 * views2[face];
-            glUniformMatrix4fv(uVP, 1, GL_FALSE, glm::value_ptr(vp));
+            glUniformMatrix4fv(uVP_PL, 1, GL_FALSE, glm::value_ptr(vp));
 
             // Sun
-            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(sun->getGlobalTransform()));
+            glUniformMatrix4fv(uModel_PL, 1, GL_FALSE, glm::value_ptr(sun->getGlobalTransform()));
             glBindVertexArray(sphereVAO);
             glDrawElements(GL_TRIANGLES, (GLsizei)sphereIndices.size(), GL_UNSIGNED_INT, 0);
 
             // Earth
-            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(earthGlobal));
+            glUniformMatrix4fv(uModel_PL, 1, GL_FALSE, glm::value_ptr(earthGlobal));
             glDrawElements(GL_TRIANGLES, (GLsizei)sphereIndices.size(), GL_UNSIGNED_INT, 0);
 
             // Mars
-            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(planetB->getGlobalTransform()));
+            glUniformMatrix4fv(uModel_PL, 1, GL_FALSE, glm::value_ptr(planetB->getGlobalTransform()));
             glDrawElements(GL_TRIANGLES, (GLsizei)sphereIndices.size(), GL_UNSIGNED_INT, 0);
 
             // Moon
-            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(moonGlobal));
+            glUniformMatrix4fv(uModel_PL, 1, GL_FALSE, glm::value_ptr(moonGlobal));
             glDrawElements(GL_TRIANGLES, (GLsizei)sphereIndices.size(), GL_UNSIGNED_INT, 0);
+
+            // Space station
+            glUniformMatrix4fv(uModel_PL, 1, GL_FALSE, glm::value_ptr(station->getGlobalTransform()));
+            glBindVertexArray(stationVAO);
+            glDrawElements(GL_TRIANGLES, (GLsizei)stationIndices.size(), GL_UNSIGNED_INT, 0);
+
+            if (!renderGalaxy) {
+                glm::mat4 M = glm::mat4(1.0f);
+                glUniformMatrix4fv(uModel_PL,1,GL_FALSE,glm::value_ptr(M));
+                glBindVertexArray(groundVAO);
+                glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,0);
+                glBindVertexArray(0);
+            }
         }
 
         glBindVertexArray(0);
         glCullFace(GL_BACK);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glEnable(GL_CULL_FACE); //restore culling
 
         // Reset viewport to window size
         int fbW, fbH; glfwGetFramebufferSize(window, &fbW, &fbH);
@@ -899,85 +1042,97 @@ int main() {
         glUseProgram(sceneProgram);
 
         // light 1 (directional/spot) shadow matrix
-        glUniformMatrix4fv(glGetUniformLocation(sceneProgram, "lightSpaceMatrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+        glUniformMatrix4fv(uLightSpace, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
 
-        // bind shadow map for light 1
+        // shadow textures (sampler units already fixed once)
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, depthTex);
-        glUniform1i(glGetUniformLocation(sceneProgram, "shadowMap"), 1);
 
-        // bind cube shadow map for light 2
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubeTex);
-        glUniform1i(glGetUniformLocation(sceneProgram, "shadowCube2"), 2);
 
-        // pass far plane for light 2 sampling
-        glUniform1f(glGetUniformLocation(sceneProgram, "farPlane2"), farPL);
+        // far plane
+        glUniform1f(uFarPlane2, farPL);
 
         // Draw the trail of the shooting star
-        glUniform1i(glGetUniformLocation(sceneProgram, "useLighting"), false);
-        glUniform1i(glGetUniformLocation(sceneProgram, "useTexture"),  false);
-        glUniform3f(glGetUniformLocation(sceneProgram, "objectColor"), 1.0f, 1.0f, 1.0f);
+        glUniform1i(uUseLighting, 0);
+        glUniform1i(uUseTexture,  0);
+        glUniform3f(uObjectColor, 1.0f, 1.0f, 1.0f);
         glLineWidth(2.0f);
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
+        glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
         glBindVertexArray(trailVAO);
         glDrawArrays(GL_LINE_STRIP, 0, (GLsizei)trailPositions.size());
 
         // Draw galaxy background
-        glm::mat4 galaxyTransform = glm::scale(glm::translate(glm::mat4(1.0f), camera.getPosition()), glm::vec3(50.0f));
-        glDisable(GL_DEPTH_TEST);
-        glCullFace(GL_FRONT);
+        if (renderGalaxy) { 
+            glm::mat4 galaxyTransform = glm::scale(glm::translate(glm::mat4(1.0f), camera.getPosition()), glm::vec3(50.0f));
+            
+            glDisable(GL_DEPTH_TEST);
+            glCullFace(GL_FRONT);
 
-        glUseProgram(sceneProgram);
-        glUniform1i(glGetUniformLocation(sceneProgram, "useLighting"), false);
-        glUniform1i(glGetUniformLocation(sceneProgram, "useTexture"), true);
-        glUniformMatrix4fv(glGetUniformLocation(sceneProgram, "model"), 1, GL_FALSE, glm::value_ptr(galaxyTransform));
+            glUseProgram(sceneProgram);
+            glUniform1i(uUseLighting, 0);
+            glUniform1i(uUseTexture,  1);
+            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(galaxyTransform));
 
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, galaxyTexture);
-        glBindVertexArray(sphereVAO);
-        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
-        glBindVertexArray(0);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, galaxyTexture);
 
-        // Restore state
-        glEnable(GL_DEPTH_TEST);
-        glCullFace(GL_BACK);
+            glBindVertexArray(sphereVAO);
+            glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+            glBindVertexArray(0);
+
+            // Restore state
+            glEnable(GL_DEPTH_TEST);
+            glCullFace(GL_BACK);
+        } else{
+            glUseProgram(sceneProgram);
+            glUniform1i(uUseLighting, 1);
+            glUniform1i(uUseTexture,  0);
+            glUniform1i(uReceiveShadows, 1);
+            glUniform3f(uObjectColor, 0.92f, 0.92f, 0.92f); // light gray
+            glm::mat4 M = glm::mat4(1.0f);
+            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(M));
+            glBindVertexArray(groundVAO);
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+            glBindVertexArray(0);
+        }
         
         // Draw orbit lines
         glUseProgram(sceneProgram);
-        glUniform1i(glGetUniformLocation(sceneProgram, "useLighting"), false);
-        glUniform1i(glGetUniformLocation(sceneProgram, "useTexture"), false);
+        glUniform1i(uUseLighting, 0);
+        glUniform1i(uUseTexture,  0);
         glDisable(GL_CULL_FACE);
         glLineWidth(2.0f); 
 
         // Planet A orbit (blue)
         glm::mat4 planetAOrbitModel = glm::rotate(glm::mat4(1.0f),earthOrbitAngle,glm::vec3(0,1,0));
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(planetAOrbitModel));
-        glUniform3f(glGetUniformLocation(sceneProgram, "objectColor"), 0.0f, 0.0f, 1.0f);
+        glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(planetAOrbitModel));
+        glUniform3f(uObjectColor, 0.0f, 0.0f, 1.0f);
         glBindVertexArray(planetAOrbitVAO);
         glDrawArrays(GL_LINE_LOOP, 0, planetAOrbitVertices.size());
 
         // Planet B orbit (red)
         glm::mat4 planetBOrbitModel = glm::rotate(glm::mat4(1.0f), marsOrbitAngle, glm::vec3(0,1,0));        
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(planetBOrbitModel));
-        glUniform3f(glGetUniformLocation(sceneProgram, "objectColor"), 1.0f, 0.0f, 0.0f);
+        glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(planetBOrbitModel));
+        glUniform3f(uObjectColor, 1.0f, 0.0f, 0.0f);
         glBindVertexArray(planetBOrbitVAO);
         glDrawArrays(GL_LINE_LOOP, 0, planetBOrbitVertices.size());
 
         // Moon orbit (orange)
         glm::mat4 moonOrbitLineM = planetA_orbit->localTransform;
         glBindVertexArray(moonOrbitVAO);
-        glUniform3f(glGetUniformLocation(sceneProgram, "objectColor"), 1.0f, 0.5f, 0.0f);
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(moonOrbitLineM));
+        glUniform3f(uObjectColor, 1.0f, 0.5f, 0.0f);
+        glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(moonOrbitLineM));
         glDrawArrays(GL_LINE_LOOP, 0, static_cast<GLsizei>(moonOrbitVertices.size()));
 
         glBindVertexArray(0);
         glEnable(GL_CULL_FACE);  // Re-enable culling
-        glUniform1i(glGetUniformLocation(sceneProgram, "useLighting"), true);  //turn lighting back on
-        glUniform1i(glGetUniformLocation(sceneProgram, "useTexture"), true);   //turn texture back on
+        glUniform1i(uUseLighting, 1);  //turn lighting back on
+        glUniform1i(uUseTexture,  1);   //turn texture back on
       
         //reset object color to white for next draw calls
-        glUniform3f(glGetUniformLocation(sceneProgram, "objectColor"), 1.0f, 1.0f, 1.0f);
+        glUniform3f(uObjectColor, 1.0f, 1.0f, 1.0f);
 
         // Draw the scene recursively, instead of draw sphere one by one, use root
         root->draw(glm::mat4(1.0f));
