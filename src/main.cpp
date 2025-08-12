@@ -16,6 +16,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "../stb/stb_image.h"
 #include <cmath>
+#include "GameUI.h"
+
 
 
 // Load shader source code from a file
@@ -541,27 +543,27 @@ int main() {
     glm::scale(glm::mat4(1.0f), glm::vec3(0.05f));
 
  // draw
-//  station->drawFunc = [&](const glm::mat4& model){
-//     glUniform1i(glGetUniformLocation(shadowProgram, "useLighting"), true);
-//     glUniform1i(glGetUniformLocation(shadowProgram, "useTexture"), false);
-//     glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-//     glBindVertexArray(stationVAO);
-//     glDrawElements(GL_TRIANGLES, (GLsizei)stationIndices.size(), GL_UNSIGNED_INT, 0);
-//     glBindVertexArray(0);
-// };
-
-station->drawFunc = [&](const glm::mat4& model){
+ station->drawFunc = [&](const glm::mat4& model){
     glUniform1i(glGetUniformLocation(shadowProgram, "useLighting"), true);
-    glUniform1i(glGetUniformLocation(shadowProgram, "useTexture"),  true); // enable texturing
+    glUniform1i(glGetUniformLocation(shadowProgram, "useTexture"), false);
     glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-
-    glActiveTexture(GL_TEXTURE0); // sampler 'texture1' is already set to 0 earlier
-    glBindTexture(GL_TEXTURE_2D, stationTexture);
-
     glBindVertexArray(stationVAO);
     glDrawElements(GL_TRIANGLES, (GLsizei)stationIndices.size(), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 };
+
+// station->drawFunc = [&](const glm::mat4& model){
+//     glUniform1i(glGetUniformLocation(shadowProgram, "useLighting"), true);
+//     glUniform1i(glGetUniformLocation(shadowProgram, "useTexture"),  true); // enable texturing
+//     glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+
+//     glActiveTexture(GL_TEXTURE0); // sampler 'texture1' is already set to 0 earlier
+//     //glBindTexture(GL_TEXTURE_2D, stationTexture);
+
+//     glBindVertexArray(stationVAO);
+//     glDrawElements(GL_TRIANGLES, (GLsizei)stationIndices.size(), GL_UNSIGNED_INT, 0);
+//     glBindVertexArray(0);
+// };
 
 
 
