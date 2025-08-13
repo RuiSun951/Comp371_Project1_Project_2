@@ -16,6 +16,8 @@
 #include "SceneNode.h" // from src/SceneNode.h
 #include <cmath>
 #include "gameUI.h"
+#include <cstdio>
+#include <algorithm>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "../stb/stb_image.h"
@@ -25,52 +27,11 @@
 
 // Global variables
 // gameUI variables
-enum class AppMode { MENU, VIEW, GAME, GAME_OVER };
-AppMode appMode = AppMode::MENU;
+enum class gameMode { MENU, VIEW, GAME, GAME_OVER };
+gameMode appMode = gameMode::MENU;
 bool   lPressedLast = false;
-
-// Game state
-int    shotsLeft   = 3;
-int    totalScore  = 0;
-bool   firePressedLast = false;
-
-// Simple laser line
-GLuint laserVAO = 0, laserVBO = 0;
-bool   laserActive  = false;
-float  laserTimer   = 0.0f;   // seconds to show the laser beam
-glm::vec3 laserA(0), laserB(0);
-
-// Hit radius
-const float R_SUN   = 1.5f;
-const float R_EARTH = 1.0f;
-const float R_MARS  = 0.4f;
-const float R_MOON  = 0.5f;
-const float R_STATION = 0.3f;
-const float R_SHOOTING_STAR = 0.1f; // shooting star hit radius
-
-// Scores
-const int SCORE_SUN   = 3;
-const int SCORE_EARTH = 5;
-const int SCORE_MARS  = 7;
-const int SCORE_MOON  = 6;
-const int SCORE_STATION = 8;
-const int SCORE_SHOOTING_STAR = 15; 
-
-static inline glm::vec3 extractTranslation(const glm::mat4& M) {
-    return glm::vec3(M[3][0], M[3][1], M[3][2]);
-}
-static bool rayHitsSphere(const glm::vec3& ro, const glm::vec3& rd,
-                          const glm::vec3& center, float radius)
-{
-    // Ray-sphere: |ro + t rd - c|^2 = r^2, solve for t>=0
-    glm::vec3 oc = ro - center;
-    float b = glm::dot(oc, rd);
-    float c = glm::dot(oc, oc) - radius*radius;
-    float disc = b*b - c;
-    if (disc < 0.0f) return false;
-    float t = -b - sqrtf(disc);
-    return t >= 0.0f;
-}
+static bool mouseDownLastFrame = false;
+static bool gameOverPrinted     = false;
 
 // Load shader source code from a file
 std::string loadShaderSource(const char* filepath) {
@@ -125,6 +86,88 @@ GLuint createShaderProgram(const char* vertPath, const char* fragPath) {
     glDeleteShader(fragmentShader);
 
     return sceneProgram;
+}
+
+// Game state
+int    shotsLeft   = 3;
+int    totalScore  = 0;
+bool   firePressedLast = false;
+
+// --- Laser as a screen-space quad ---
+GLuint laserVAO = 0, laserVBO = 0;
+GLuint laserProg = 0;
+const  float LASER_PIXELS   = 6.0f;  // thickness in pixels
+
+static const char* LASER_VERT = R"(#version 330 core
+layout (location=0) in vec3 aPosNDC; // already in NDC (-1..1)
+void main() { gl_Position = vec4(aPosNDC, 1.0); }
+)";
+
+static const char* LASER_FRAG = R"(#version 330 core
+out vec4 FragColor;
+uniform vec3 uColor;
+void main() { FragColor = vec4(uColor, 1.0); }
+)";
+
+bool   laserActive  = false;
+float  laserTimer   = 0.0f;   // default 0 second to show the laser beam
+glm::vec3 laserA(0), laserB(0);
+static bool rayHitsSphere(const glm::vec3& ro, const glm::vec3& rd, const glm::vec3& center, float radius)
+{
+    // Ray-sphere: |ro + t rd - c|^2 = r^2, solve for t>=0
+    glm::vec3 oc = ro - center;
+    float b = glm::dot(oc, rd);
+    float c = glm::dot(oc, oc) - radius*radius;
+    float disc = b*b - c;
+    if (disc < 0.0f) return false;
+    float t = -b - sqrtf(disc);
+    return t >= 0.0f;
+}
+
+GLuint laserProgram(const char* vertSrc, const char* fragSrc) {
+    GLuint vs = compileShader(GL_VERTEX_SHADER,   vertSrc);
+    GLuint fs = compileShader(GL_FRAGMENT_SHADER, fragSrc);
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, vs);
+    glAttachShader(prog, fs);
+    glLinkProgram(prog);
+    GLint ok = GL_FALSE;
+    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[1024];
+        glGetProgramInfoLog(prog, 1024, nullptr, log);
+        std::cerr << "Laser program link error:\n" << log << std::endl;
+    }
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    return prog;
+}
+
+// laser fine tuning
+const float LASER_DURATION = 0.50f;
+const glm::vec3 LASER_COLOR(0.10f, 1.00f, 0.25f);   // bright neon green
+
+// Crosshair for shooting
+GLuint crossVAO = 0, crossVBO = 0;
+
+// Hit radius
+const float R_SUN   = 1.5f;
+const float R_EARTH = 1.0f;
+const float R_MARS  = 0.4f;
+const float R_MOON  = 0.5f;
+const float R_STATION = 0.3f;
+const float R_SHOOTING_STAR = 0.1f; // shooting star hit radius
+
+// Scores
+const int SCORE_SUN   = 3;
+const int SCORE_EARTH = 5;
+const int SCORE_MARS  = 7;
+const int SCORE_MOON  = 6;
+const int SCORE_STATION = 8;
+const int SCORE_SHOOTING_STAR = 15; 
+
+static inline glm::vec3 extractTranslation(const glm::mat4& M) {
+    return glm::vec3(M[3][0], M[3][1], M[3][2]);
 }
 
 // time control toggle
@@ -464,11 +507,23 @@ int main() {
 
     // wrap game UI
     UI::Init();
+    laserProg = laserProgram(LASER_VERT, LASER_FRAG);
     glGenVertexArrays(1, &laserVAO);
     glGenBuffers(1, &laserVBO);
     glBindVertexArray(laserVAO);
     glBindBuffer(GL_ARRAY_BUFFER, laserVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * 2, nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * 6, nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // Crosshair VAO/VBO (4 verts = 2 lines)
+    glGenVertexArrays(1, &crossVAO);
+    glGenBuffers(1, &crossVBO);
+    glBindVertexArray(crossVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, crossVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * 4, nullptr, GL_DYNAMIC_DRAW);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
@@ -578,14 +633,14 @@ int main() {
         std::cerr << "Failed to load spacestation.obj\n";
     }
     
-    // --- Fixup station data if OBJ lacked normals/UVs or indices didn't align ---
+    // Fix station data if OBJ lacked normals/UVs or indices didn't align
     bool needReupload = false;
     if (!hasAnyNormals(stationVertices)) {
         recomputeNormals(stationVertices, stationIndices);
         needReupload = true;
     }
     if (!hasAnyUVs(stationVertices)) {
-        generateSphericalUVs(stationVertices); // quick & decent for rounded shapes
+        generateSphericalUVs(stationVertices);
         needReupload = true;
     }
     if (needReupload) {
@@ -825,6 +880,9 @@ int main() {
 
     // main render loop
     while (!glfwWindowShouldClose(window)) {
+        int fbw = 0, fbh = 0;   //later use for view/proj
+
+        glfwPollEvents();
 
         if (renderGalaxy) glClearColor(0.10f, 0.10f, 0.10f, 1.0f);   // dark gray when galaxy on, for immersive background
         else              glClearColor(0.25f, 0.25f, 0.25f, 1.0f);
@@ -833,13 +891,13 @@ int main() {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // game menu mode control
-        if (appMode == AppMode::MENU) {
+        if (appMode == gameMode::MENU) {
             // Always show galaxy as background
             renderGalaxy = true;
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
             
             // bug fix: set view/proj before drawing the galaxy once
-            int fbw = 0, fbh = 0;
+            fbw = 0, fbh = 0;
             glfwGetFramebufferSize(window, &fbw, &fbh);
             glm::mat4 viewM = camera.getViewMatrix();
             glm::mat4 projM = glm::perspective(glm::radians(45.0f), (float)fbw / (float)fbh, 0.1f, 200.0f);
@@ -879,34 +937,59 @@ int main() {
             }
 
             // Two centered buttons (top = VIEW MODE, bottom = GAME MODE)
-            fbw=0, fbh=0; glfwGetFramebufferSize(window, &fbw, &fbh);
+            fbw=0, fbh=0; 
+            glfwGetFramebufferSize(window, &fbw, &fbh);
             float bw = 520.0f, bh = 120.0f;
             float cx = fbw * 0.5f - bw * 0.5f;
             float cy = fbh * 0.5f - bh * 0.5f;
             float pad = 20.0f;
 
-            bool startView = UI::Button(window, cx, cy - (bh + pad), bw, bh, true);
-            bool startGame = UI::Button(window, cx, cy + (bh + pad), bw, bh, true);
+            UI::Button(window, cx, cy - (bh + pad), bw, bh, true);
+            UI::Button(window, cx, cy + (bh + pad), bw, bh, true);
+            UI::Text  (window, cx, cy - (bh + pad), bw, bh, "VIEW MODE");
+            UI::Text  (window, cx, cy + (bh + pad), bw, bh, "GAME MODE");
 
-            UI::Text(window, cx, cy - (bh + pad), bw, bh, "VIEW MODE");
-            UI::Text(window, cx, cy + (bh + pad), bw, bh, "GAME MODE");
+            // DPI-aware hit test: convert window coords -> framebuffer coords
+            int winW=0, winH=0; 
+            glfwGetWindowSize(window, &winW, &winH);
+            int fbw2=0, fbh2=0; 
+            glfwGetFramebufferSize(window, &fbw2, &fbh2);
+            double scaleX = (winW>0) ? double(fbw2)/double(winW) : 1.0;
+            double scaleY = (winH>0) ? double(fbh2)/double(winH) : 1.0;
+
+            double mx=0.0, my=0.0; glfwGetCursorPos(window, &mx, &my);
+            double mxFB = mx * scaleX, myFB = my * scaleY;
+
+            auto inside = [](double x,double y,double rx,double ry,double rw,double rh){
+                return x>=rx && x<=rx+rw && y>=ry && y<=ry+rh;
+            };
+
+            static bool mouseDownLastFrame = false; // local static for edge-trigger
+            bool mouseDownNow = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
+
+            bool viewHover = inside(mxFB, myFB, cx,              cy - (bh + pad), bw, bh);
+            bool gameHover = inside(mxFB, myFB, cx,              cy + (bh + pad), bw, bh);
+
+            bool startView = (mouseDownNow && !mouseDownLastFrame && viewHover);
+            bool startGame = (mouseDownNow && !mouseDownLastFrame && gameHover);
+            mouseDownLastFrame = mouseDownNow;
 
             if (startView) {
-                appMode = AppMode::VIEW;
+                appMode = gameMode::VIEW;
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
             }
             if (startGame) {
-                appMode = AppMode::GAME;
+                appMode = gameMode::GAME;
                 shotsLeft  = 3;
                 totalScore = 0;
                 laserActive = false;
                 laserTimer  = 0.0f;
+                firePressedLast = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
             }
 
             // Finish this frame early (don’t run normal scene)
             glfwSwapBuffers(window);
-            glfwPollEvents();
             continue;
         }
 
@@ -937,7 +1020,7 @@ int main() {
         tabPressedLastFrame = tabPressedNow;
 
         // background galaxy toggle on/off with 'P' — only in VIEW mode
-        if (appMode == AppMode::VIEW) {
+        if (appMode == gameMode::VIEW) {
             bool pPressedNow = glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS;
             if (pPressedNow && !pPressedLastFrame) {
                 renderGalaxy = !renderGalaxy;
@@ -951,8 +1034,8 @@ int main() {
 
         bool lNow = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
         if (lNow && !lPressedLast) {
-            if (appMode == AppMode::VIEW || appMode == AppMode::GAME || appMode == AppMode::GAME_OVER) {
-                appMode = AppMode::MENU;
+            if (appMode == gameMode::VIEW || appMode == gameMode::GAME || appMode == gameMode::GAME_OVER) {
+                appMode = gameMode::MENU;
                 // show cursor again in menu
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
                 // reset session variables for a fresh start
@@ -968,11 +1051,15 @@ int main() {
 
 
         // Create transformation matrices
-        glm::mat4 model = glm::mat4(1.0f); // identity
-        glm::mat4 view = camera.getViewMatrix();  // use your camera's method
+        glm::mat4 model = glm::mat4(1.0f);
+        glm::mat4 view  = camera.getViewMatrix();
+        // Use actual framebuffer size for aspect ratio
+        fbw = 1, fbh = 1;
+        glfwGetFramebufferSize(window, &fbw, &fbh);
+        float aspect = (fbh > 0) ? (float)fbw / (float)fbh  : 1.0f;
         glm::mat4 projection = glm::perspective(
             glm::radians(45.0f),
-            800.0f / 600.0f,   // aspect ratio
+            aspect,
             0.1f,
             100.0f
         );
@@ -1000,7 +1087,7 @@ int main() {
         glm::mat4 lightSpaceMatrix = lightProj * lightView;
 
         // light 2 shadow setup 
-        float nearPL = 0.1f, farPL = 100.0f; // tweak if needed
+        float nearPL = 0.1f, farPL = 100.0f; 
         glm::mat4 shadowProj2 = glm::perspective(glm::radians(90.0f), 1.0f, nearPL, farPL);
         glm::vec3 lp = lightPos2;
         glm::mat4 views2[6] = {
@@ -1199,7 +1286,8 @@ int main() {
         glEnable(GL_CULL_FACE); //restore culling
 
         // Reset viewport to window size
-        int fbW, fbH; glfwGetFramebufferSize(window, &fbW, &fbH);
+        int fbW, fbH; 
+        glfwGetFramebufferSize(window, &fbW, &fbH);
         glViewport(0, 0, fbW, fbH);
         glUseProgram(sceneProgram);
 
@@ -1300,38 +1388,63 @@ int main() {
         // Draw the scene recursively, instead of draw sphere one by one, use root
         root->draw(glm::mat4(1.0f));
 
-        // draw game components: hologram + laser + scoring
-        if (appMode == AppMode::GAME) {
-            // Hologram: wireframe sphere 3 units in front of camera
-            glm::mat4 holoM =
-                glm::translate(glm::mat4(1.0f), camera.getPosition() + camera.getFront() * 3.0f) *
-                glm::scale(glm::mat4(1.0f), glm::vec3(0.75f));
+        if (appMode == gameMode::GAME) {
+            // Draw crosshair: small red cross at window center (screen-space)
+            glm::mat4 view3D = view;
+            glm::mat4 proj3D = projection;
+
+            glfwGetFramebufferSize(window, &fbW, &fbH);
+
+            const float s = 10.0f;
+            const float cx = 0.5f * fbW;
+            const float cy = 0.5f * fbH;
+
+            glm::vec3 ch[4] = {
+                {cx - s, cy, 0.0f}, {cx + s, cy, 0.0f},
+                {cx, cy - s, 0.0f}, {cx, cy + s, 0.0f}
+            };
+            glBindBuffer(GL_ARRAY_BUFFER, crossVBO);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(ch), ch);
+
+            glm::mat4 viewHUD = glm::mat4(1.0f);
+            glm::mat4 projHUD = glm::ortho(0.0f, (float)fbW, (float)fbH, 0.0f, -1.0f, 1.0f);
 
             glUseProgram(sceneProgram);
+            glUniformMatrix4fv(uView, 1, GL_FALSE, glm::value_ptr(viewHUD));
+            glUniformMatrix4fv(uProj, 1, GL_FALSE, glm::value_ptr(projHUD));
+            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
             glUniform1i(uUseLighting, 0);
             glUniform1i(uUseTexture,  0);
             glUniform1i(uReceiveShadows, 0);
-            glUniform3f(uObjectColor, 0.2f, 0.9f, 1.0f);
-            glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(holoM));
-            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-            glBindVertexArray(sphereVAO);
-            glDrawElements(GL_TRIANGLES, (GLsizei)sphereIndices.size(), GL_UNSIGNED_INT, 0);
-            glBindVertexArray(0);
-            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            glUniform3f(uObjectColor, 1.0f, 0.0f, 0.0f);
 
-            // HUD rectangles (shots/score) — visual only
+            glDisable(GL_DEPTH_TEST);
+            glBindVertexArray(crossVAO);
+            glLineWidth(2.0f);
+            glDrawArrays(GL_LINES, 0, 4);
+            glBindVertexArray(0);
+            glEnable(GL_DEPTH_TEST);
+
+            // restore 3D matrices
+            glUniformMatrix4fv(uView, 1, GL_FALSE, glm::value_ptr(view3D));
+            glUniformMatrix4fv(uProj, 1, GL_FALSE, glm::value_ptr(proj3D));
+
             UI::Button(window, 20, 20, 220, 40, false);
             UI::Button(window, 20, 70, 220, 40, false);
-            // Optional console output:
-            // printf("Shots Left: %d  |  Score: %d\r", shotsLeft, totalScore);
+            std::string s1 = "Shots Left: " + std::to_string(shotsLeft);
+            std::string s2 = "Score: "      + std::to_string(totalScore);
+            UI::Text(window, 20, 20, 220, 40, s1.c_str());
+            UI::Text(window, 20, 70, 220, 40, s2.c_str());
+        }
 
-            // Edge-trigger fire on LMB
+
+        // Edge-trigger fire on LMB (GAME only)
+        if (appMode == gameMode::GAME) {
             bool fireNow = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
             if (fireNow && !firePressedLast && shotsLeft > 0) {
                 glm::vec3 ro = camera.getPosition();
                 glm::vec3 rd = glm::normalize(camera.getFront());
 
-                // centers from current transforms
                 glm::vec3 cSun     = extractTranslation(sun->getGlobalTransform());
                 glm::vec3 cEarth   = extractTranslation(planetA_orbit->getGlobalTransform() * planetA_body->localTransform);
                 glm::vec3 cMars    = extractTranslation(planetB->getGlobalTransform());
@@ -1339,47 +1452,122 @@ int main() {
                 glm::vec3 cStation = extractTranslation(station->getGlobalTransform());
 
                 int gained = 0;
-                if (rayHitsSphere(ro, rd, cSun, R_SUN))           gained += SCORE_SUN;
-                if (rayHitsSphere(ro, rd, cEarth, R_EARTH))       gained += SCORE_EARTH;
-                if (rayHitsSphere(ro, rd, cMars, R_MARS))         gained += SCORE_MARS;
-                if (rayHitsSphere(ro, rd, cMoon, R_MOON))         gained += SCORE_MOON;
-                if (rayHitsSphere(ro, rd, cStation, R_STATION))   gained += SCORE_STATION;
+                if (rayHitsSphere(ro, rd, cSun, R_SUN))         gained += SCORE_SUN;
+                if (rayHitsSphere(ro, rd, cEarth, R_EARTH))     gained += SCORE_EARTH;
+                if (rayHitsSphere(ro, rd, cMars, R_MARS))       gained += SCORE_MARS;
+                if (rayHitsSphere(ro, rd, cMoon, R_MOON))       gained += SCORE_MOON;
+                if (rayHitsSphere(ro, rd, cStation, R_STATION)) gained += SCORE_STATION;
 
                 totalScore += gained;
                 shotsLeft  -= 1;
 
-                // laser visual
-                glm::vec3 pts[2] = { ro, ro + rd * 100.0f };
-                glBindBuffer(GL_ARRAY_BUFFER, laserVBO);
-                glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(pts), pts);
-                glBindBuffer(GL_ARRAY_BUFFER, 0);
+                const float EPS = 0.20f;                 // small offset to avoid near-plane clipping
+                glm::vec3 start = ro + rd * EPS;         // start just in front of the camera
+                glm::vec3 end   = ro + rd * 100.0f;      // keep the far end
+                
+                laserA = start;
+                laserB = end;
                 laserActive = true;
-                laserTimer  = 0.15f;
-
+                laserTimer  = LASER_DURATION;
+                glBindBuffer(GL_ARRAY_BUFFER, 0);
+                
                 if (shotsLeft == 0) {
-                    appMode = AppMode::GAME_OVER;
+                    appMode = gameMode::GAME_OVER;
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                    firePressedLast = false;
                 }
             }
             firePressedLast = fireNow;
+        } else {
+            // ensure no latent edge-trigger carries into other modes
+            firePressedLast = false;
+        }
 
-            // Draw laser while active
-            if (laserActive) {
-                laserTimer -= deltaTime;
-                if (laserTimer <= 0.0f) laserActive = false;
-                glUseProgram(sceneProgram);
-                glUniform1i(uUseLighting, 0);
-                glUniform1i(uUseTexture,  0);
-                glUniform3f(uObjectColor, 1.0f, 1.0f, 1.0f);
-                glUniformMatrix4fv(uModel, 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
-                glBindVertexArray(laserVAO);
-                glLineWidth(3.0f);
-                glDrawArrays(GL_LINES, 0, 2);
-                glBindVertexArray(0);
+
+        // Draw laser while active (GAME only) — screen-space quad, constant pixel thickness
+        if (appMode == gameMode::GAME && laserActive) {
+            laserTimer -= deltaTime;
+            if (laserTimer <= 0.0f) laserActive = false;
+
+            // Project endpoints to NDC
+            glm::vec4 aClip = projection * view * glm::vec4(laserA, 1.0f);
+            glm::vec4 bClip = projection * view * glm::vec4(laserB, 1.0f);
+            if (aClip.w == 0.0f || bClip.w == 0.0f) {
+                // avoid div by zero; skip this frame
+            } else {
+                glm::vec3 aNDC = glm::vec3(aClip) / aClip.w; // [-1..1]
+                glm::vec3 bNDC = glm::vec3(bClip) / bClip.w;
+
+                // Convert to screen pixels
+                int fbW = 0, fbH = 0;
+                glfwGetFramebufferSize(window, &fbW, &fbH);
+                auto ndcToScreen = [fbW, fbH](const glm::vec3& p)->glm::vec3{
+                    float sx = (p.x * 0.5f + 0.5f) * fbW;
+                    float sy = (1.0f - (p.y * 0.5f + 0.5f)) * fbH; // invert Y
+                    return glm::vec3(sx, sy, p.z);
+                };
+                auto aS = ndcToScreen(aNDC);
+                auto bS = ndcToScreen(bNDC);
+
+                // 2D perpendicular of the segment
+                glm::vec2 v = glm::vec2(bS - aS);
+                float L = glm::length(v);
+                if (L > 1e-3f) {
+                    glm::vec2 dir = v / L;
+                    glm::vec2 perp(-dir.y, dir.x);
+                    glm::vec2 off = perp * (LASER_PIXELS * 0.5f);
+
+                    // 4 corners in screen space (z from the nearer endpoint)
+                    float z = std::min(aS.z, bS.z);
+                    glm::vec3 P0 = glm::vec3(aS.x + off.x, aS.y + off.y, z);
+                    glm::vec3 P1 = glm::vec3(bS.x + off.x, bS.y + off.y, z);
+                    glm::vec3 P2 = glm::vec3(bS.x - off.x, bS.y - off.y, z);
+                    glm::vec3 P3 = glm::vec3(aS.x - off.x, aS.y - off.y, z);
+
+                    // Back to NDC for the laser shader
+                    auto screenToNDC = [fbW, fbH](const glm::vec3& s)->glm::vec3{
+                        float x = (s.x / (float)fbW) * 2.0f - 1.0f;
+                        float y = 1.0f - (s.y / (float)fbH) * 2.0f;
+                        return glm::vec3(x, y, s.z);
+                    };
+                    glm::vec3 v0 = screenToNDC(P0);
+                    glm::vec3 v1 = screenToNDC(P1);
+                    glm::vec3 v2 = screenToNDC(P2);
+                    glm::vec3 v3 = screenToNDC(P3);
+
+                    glm::vec3 tris[6] = { v0, v1, v2,  v0, v2, v3 };
+
+                    glBindBuffer(GL_ARRAY_BUFFER, laserVBO);
+                    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(tris), tris);
+                    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+                    // Draw in screen space with additive blending
+                    glUseProgram(laserProg);
+                    GLint uColorLoc = glGetUniformLocation(laserProg, "uColor");
+                    glUniform3f(uColorLoc, LASER_COLOR.x, LASER_COLOR.y, LASER_COLOR.z);
+
+                    glDisable(GL_DEPTH_TEST);
+                    glDisable(GL_CULL_FACE);
+                    glEnable(GL_BLEND);
+                    glBlendFunc(GL_ONE, GL_ONE);
+
+                    glBindVertexArray(laserVAO);
+                    glDrawArrays(GL_TRIANGLES, 0, 6);
+                    glBindVertexArray(0);
+
+                    glDisable(GL_BLEND);
+                    glEnable(GL_DEPTH_TEST);
+                    glEnable(GL_CULL_FACE);
+                }
             }
         }
 
+
         // game over screen display
-        if (appMode == AppMode::GAME_OVER) {
+        if (appMode == gameMode::GAME_OVER) {
+            // ensure cursor is visible on this screen
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+
             // Background galaxy
             glm::mat4 galaxyTransform =
                 glm::scale(glm::translate(glm::mat4(1.0f), camera.getPosition()), glm::vec3(50.0f));
@@ -1402,18 +1590,77 @@ int main() {
             glEnable(GL_DEPTH_TEST);
             glCullFace(GL_BACK);
 
-            // Two centered boxes (visual): "GAME OVER" and "Score"
+            // Centered UI
             int fbw=0, fbh=0; glfwGetFramebufferSize(window, &fbw, &fbh);
-            UI::Button(window, fbw*0.5f - 200, fbh*0.5f - 100, 400, 80, false);
-            UI::Button(window, fbw*0.5f - 200, fbh*0.5f +  20, 400, 80, false);
+            float boxW = 520.0f, boxH = 80.0f;
+            float cx   = fbw * 0.5f;
+            float cy   = fbh * 0.5f;
+            float padY = 20.0f;
 
-            static bool printed = false;
-            if (!printed) {
-                printf("\n=== GAME OVER ===\nFinal Score: %d\nPress L to return to Menu.\n", totalScore);
-                printed = true;
+            // Title + score
+            UI::Button(window, cx - 260, cy - 180, 520, 80, false);
+            UI::Button(window, cx - 260, cy -  90, 520, 60, false);
+            UI::Text  (window, cx - 260, cy - 180, 520, 80, "GAME OVER");
+
+            {
+                std::string sc = "SCORE: " + std::to_string(totalScore);
+                UI::Text(window, cx - 260, cy - 90, 520, 60, sc.c_str());
+            }
+
+            // Two buttons: Try Again / Main Menu
+            float tryX = cx - boxW - 20.0f;
+            float tryY = cy + 20.0f;
+            float menX = cx + 20.0f;
+            float menY = cy + 20.0f;
+
+            UI::Button(window, tryX, tryY, boxW, boxH, true);
+            UI::Button(window, menX, menY, boxW, boxH, true);
+            UI::Text  (window, tryX, tryY, boxW, boxH, "TRY AGAIN");
+            UI::Text  (window, menX, menY, boxW, boxH, "MAIN MENU");
+
+            // DPI-aware click hit-test (same idea as in MENU)
+            int winW=0, winH=0; glfwGetWindowSize(window, &winW, &winH);
+            int fbw2=0, fbh2=0; glfwGetFramebufferSize(window, &fbw2, &fbh2);
+            double scaleX = (winW>0) ? double(fbw2)/double(winW) : 1.0;
+            double scaleY = (winH>0) ? double(fbh2)/double(winH) : 1.0;
+
+            double mx=0.0, my=0.0; glfwGetCursorPos(window, &mx, &my);
+            double mxFB = mx * scaleX, myFB = my * scaleY;
+
+            auto inside = [](double x,double y,double rx,double ry,double rw,double rh){
+                return x>=rx && x<=rx+rw && y>=ry && y<=ry+rh;
+            };
+
+            static bool mouseDownLastGO = false;
+            bool mouseDownNow = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
+
+            bool overTry = inside(mxFB, myFB, tryX, tryY, boxW, boxH);
+            bool overMen = inside(mxFB, myFB, menX, menY, boxW, boxH);
+
+            bool clickedTry = (mouseDownNow && !mouseDownLastGO && overTry);
+            bool clickedMen = (mouseDownNow && !mouseDownLastGO && overMen);
+            mouseDownLastGO = mouseDownNow;
+
+            if (clickedTry) {
+                // reset game state and jump back to GAME
+                shotsLeft    = 3;
+                totalScore   = 0;
+                laserActive  = false;
+                laserTimer   = 0.0f;
+                firePressedLast = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
+                appMode = gameMode::GAME;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // lock cursor again
+            }
+            if (clickedMen) {
+                // back to main menu
+                shotsLeft    = 3;
+                laserActive  = false;
+                laserTimer   = 0.0f;
+                firePressedLast = false;
+                appMode = gameMode::MENU;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
             }
         }
-
 
         // esc to exit the program
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS){
@@ -1422,7 +1669,6 @@ int main() {
 
         // Swap buffers and poll events
         glfwSwapBuffers(window);
-        glfwPollEvents();
     }
 
     // Clean-up
@@ -1430,6 +1676,8 @@ int main() {
 
     if (laserVBO) glDeleteBuffers(1, &laserVBO);
     if (laserVAO) glDeleteVertexArrays(1, &laserVAO);
+    if (crossVBO) glDeleteBuffers(1, &crossVBO);
+    if (crossVAO) glDeleteVertexArrays(1, &crossVAO);
     UI::Shutdown();
 
     glfwDestroyWindow(window);

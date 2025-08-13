@@ -145,7 +145,8 @@ void Shutdown() {
 }
 
 bool Button(GLFWwindow* window, float x, float y, float w, float h, bool enabled) {
-    int fbw = 0, fbh = 0; glfwGetFramebufferSize(window, &fbw, &fbh);
+    int fbw = 0, fbh = 0; 
+    glfwGetFramebufferSize(window, &fbw, &fbh);
 
     double mx, my; glfwGetCursorPos(window, &mx, &my);
     int ww, wh; glfwGetWindowSize(window, &ww, &wh);

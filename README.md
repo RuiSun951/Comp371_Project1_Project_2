@@ -62,6 +62,7 @@ Project1/
 - fine tuned camera control and mouse sensitivity
 - extra user interaction (eg: shooter game style)
 - game UI wrap, with obeservation mode and game mode
+- game mode hitbox design and score calculate
 - Press `L` to return upper menu in game UI
 
 ### Updated Folder Structure Assignment 2
