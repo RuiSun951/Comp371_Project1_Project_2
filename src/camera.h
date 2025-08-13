@@ -4,6 +4,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <GLFW/glfw3.h>
+#include <cmath>
 
 enum CameraMode { FIRST_PERSON, THIRD_PERSON };
 
@@ -18,12 +19,27 @@ public:
     float yaw;
     float pitch;
     float speed=1.0f;
-    float mouseSensitivity;
+    float mouseSensitivity = 0.06f;
     float zoom;
     CameraMode mode;
 
+    // Tuning
+    float smoothingHz    = 10.0f;     // 8–20 is typical
+    float mouseDeadzone  = 0.05f;
+    float mouseMaxStep   = 60.0f;     // clamp large spikes
+
+    // Smoothing state
+    glm::vec2 smoothedDelta = glm::vec2(0.0f);
+
+    // Re-arm mouse deltas after cursor mode/focus changes
+    void resetMouse() {
+        firstMouse = true;
+        smoothedDelta = glm::vec2(0.0f);
+    }
+
     Camera(glm::vec3 startPos, glm::vec3 upDir, float startYaw, float startPitch, CameraMode mode = FIRST_PERSON)
-        : front(glm::vec3(0.0f, 0.0f, -1.0f)), speed(2.5f), mouseSensitivity(0.1f), zoom(45.0f), mode(mode) {
+    : front(glm::vec3(0.0f, 0.0f, -1.0f)), speed(2.5f), zoom(45.0f), mode(mode) 
+    {
         position = startPos;
         worldUp = upDir;
         yaw = startYaw;
@@ -41,22 +57,56 @@ public:
     void update(GLFWwindow* window, float deltaTime) {
         processKeyboard(window, deltaTime);
 
-        double xpos, ypos;
+        // Only read mouse when cursor is captured and window is focused
+        if (glfwGetInputMode(window, GLFW_CURSOR) != GLFW_CURSOR_DISABLED ||
+            glfwGetWindowAttrib(window, GLFW_FOCUSED) != GLFW_TRUE) {
+            resetMouse();
+            return;
+        }
+
+        int ww = 0, wh = 0;
+        glfwGetWindowSize(window, &ww, &wh);
+        double cx = ww * 0.5, cy = wh * 0.5;
+
+        double xpos = 0.0, ypos = 0.0;
         glfwGetCursorPos(window, &xpos, &ypos);
 
         if (firstMouse) {
-            lastMouseX = xpos;
-            lastMouseY = ypos;
+            glfwSetCursorPos(window, cx, cy);
+            lastMouseX = cx;
+            lastMouseY = cy;
             firstMouse = false;
+            return; // skip one frame to avoid a spike
         }
 
-        double xoffset = xpos - lastMouseX;
-        double yoffset = lastMouseY - ypos; // reversed
+        float dx = static_cast<float>(xpos - cx);
+        float dy = static_cast<float>(cy - ypos); // Y reversed
 
-        lastMouseX = xpos;
-        lastMouseY = ypos;
+        // Recenter every frame so (xpos,ypos) is always relative to center
+        glfwSetCursorPos(window, cx, cy);
 
-        processMouseMovement((float)xoffset, (float)yoffset);
+        // deadzone to kill tiny jitter
+        if (std::fabs(dx) < mouseDeadzone) dx = 0.0f;
+        if (std::fabs(dy) < mouseDeadzone) dy = 0.0f;
+
+        // clamp spikes (e.g., when the window regains focus)
+        dx = glm::clamp(dx, -mouseMaxStep, mouseMaxStep);
+        dy = glm::clamp(dy, -mouseMaxStep, mouseMaxStep);
+
+        // time-aware smoothing that snaps to zero when there's no input
+        glm::vec2 raw(dx, dy);
+
+        // if raw is zero (after deadzone), kill the tail immediately
+        if (raw.x == 0.0f && raw.y == 0.0f) {
+            smoothedDelta = glm::vec2(0.0f);
+        } else {
+            float alpha = 1.0f - std::exp(-smoothingHz * deltaTime); // 0..1
+            smoothedDelta = glm::mix(smoothedDelta, raw, alpha);
+            if (glm::length(smoothedDelta) < 0.001f) smoothedDelta = glm::vec2(0.0f);
+        }
+        processMouseMovement(smoothedDelta.x, smoothedDelta.y);
+
+        //this code segment above is to prevent camera drift when the mouse is not moving, per previous implementation
     }
 
     void processKeyboard(GLFWwindow* window, float deltaTime) {
@@ -75,7 +125,6 @@ public:
     }
 
     void processMouseMovement(float xoffset, float yoffset) {
-        float mouseSensitivity = 0.003f;
         xoffset *= mouseSensitivity;
         yoffset *= mouseSensitivity;
 

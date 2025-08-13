@@ -498,6 +498,12 @@ int main() {
     }
     glfwMakeContextCurrent(window); // Make this window the OpenGL context
 
+    // mouse control fine tuning
+    if (glfwRawMouseMotionSupported()) {
+        glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+    }
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
     // Initialize GLEW after the context
     glewExperimental = true; // Needed for core profile
     if (glewInit() != GLEW_OK) {
@@ -734,8 +740,6 @@ int main() {
 
     // Set background color
     glClearColor(1.0f, 1.0f, 1.0f, 1.0f); // pure white background
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);    //disable cursor
-
 
     // camera setup
     Camera camera(
@@ -744,6 +748,7 @@ int main() {
         -90.0f,                       // yaw
         0.0f                          // pitch
     );
+    camera.resetMouse();
 
     SceneNode* root = new SceneNode();  //identity node
     SceneNode* galaxy = new SceneNode();
@@ -877,12 +882,17 @@ int main() {
     float deltaTime = 0.0f;
     float lastFrame = 0.0f;
     float simTime =0.0f;
+    gameMode lastAppMode = appMode;
 
     // main render loop
     while (!glfwWindowShouldClose(window)) {
         int fbw = 0, fbh = 0;   //later use for view/proj
 
         glfwPollEvents();
+        if (appMode != lastAppMode) {
+            camera.resetMouse();
+            lastAppMode = appMode;
+        }//recentering camera on mode switch
 
         if (renderGalaxy) glClearColor(0.10f, 0.10f, 0.10f, 1.0f);   // dark gray when galaxy on, for immersive background
         else              glClearColor(0.25f, 0.25f, 0.25f, 1.0f);
@@ -977,6 +987,7 @@ int main() {
             if (startView) {
                 appMode = gameMode::VIEW;
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                camera.resetMouse();
             }
             if (startGame) {
                 appMode = gameMode::GAME;
@@ -986,6 +997,7 @@ int main() {
                 laserTimer  = 0.0f;
                 firePressedLast = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                camera.resetMouse();
             }
 
             // Finish this frame early (don’t run normal scene)
@@ -1038,13 +1050,14 @@ int main() {
                 appMode = gameMode::MENU;
                 // show cursor again in menu
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                camera.resetMouse();
+
                 // reset session variables for a fresh start
                 shotsLeft   = 3;
                 totalScore  = 0;
                 laserActive = false;
                 laserTimer  = 0.0f;
                 // allow GAME OVER print again
-                // (the printed static in step 6 will re-arm on next run)
             }
         }
         lPressedLast = lNow;
@@ -1474,6 +1487,7 @@ int main() {
                 if (shotsLeft == 0) {
                     appMode = gameMode::GAME_OVER;
                     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                    camera.resetMouse();
                     firePressedLast = false;
                 }
             }
@@ -1567,6 +1581,7 @@ int main() {
         if (appMode == gameMode::GAME_OVER) {
             // ensure cursor is visible on this screen
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            camera.resetMouse(); 
 
             // Background galaxy
             glm::mat4 galaxyTransform =
@@ -1649,7 +1664,8 @@ int main() {
                 laserTimer   = 0.0f;
                 firePressedLast = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
                 appMode = gameMode::GAME;
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // lock cursor again
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); 
+                camera.resetMouse(); // reset mouse position for new game
             }
             if (clickedMen) {
                 // back to main menu
@@ -1659,6 +1675,7 @@ int main() {
                 firePressedLast = false;
                 appMode = gameMode::MENU;
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                camera.resetMouse(); 
             }
         }
 
